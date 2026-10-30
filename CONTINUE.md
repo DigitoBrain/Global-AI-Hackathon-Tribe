@@ -1,9 +1,9 @@
 # Continue Here — Tribe Hackathon (read this first)
 
-> If you are a new session/agent picking this up cold: read this file top to bottom, then [docs/positioning.md](docs/positioning.md), then [docs/decisions.md](docs/decisions.md), then [docs/plan.md](docs/plan.md), then [tribe.md](tribe.md). Do not re-ask decisions already logged as **Decided** unless the user reopens them.
+> If you are a new session/agent picking this up cold: read this file top to bottom, then [docs/implementation.md](docs/implementation.md) (what is built, verified, and left), then [docs/positioning.md](docs/positioning.md), then [docs/decisions.md](docs/decisions.md), then [docs/plan.md](docs/plan.md), then [tribe.md](tribe.md). Do not re-ask decisions already logged as **Decided** unless the user reopens them.
 
-Last updated: 2026-10-29 (planning session, no code written yet)
-Documentation status: **Draft** — becomes Final only when user explicitly accepts (e.g. replies `go`)
+Last updated: 2026-10-31 (MVP implemented and verified; Meta Model API live)
+Documentation status: **Final** (user accepted plan 2026-10-31)
 
 ## What this project is
 
@@ -34,11 +34,13 @@ We are building a hackathon MVP slice of that vision, not the whole platform.
 - [x] Wrote decision log: [docs/decisions.md](docs/decisions.md)
 - [x] Wrote this recovery file
 - [x] User clarified positioning (individual-first, cognitive load, share/fork, guardrails, attempt log) → recorded in [docs/positioning.md](docs/positioning.md) + decisions D-008…D-012
-- [ ] **Waiting on user: reply `go` to execute the plan** (no implementation started yet)
-- [ ] No code, no repo scaffolding, no API keys configured yet in this workspace
-- [ ] Not yet confirmed: Meta Model API key/access, team members beyond user, GitHub/LinkedIn links for application
+- [x] User accepted plan; MVP implemented (React web + Node/SQLite + MCP, D-013) — details in [docs/implementation.md](docs/implementation.md)
+- [x] Meta Model API key configured in `.env.local` (git-ignored) and live-verified with `muse-spark-1.3`
+- [x] Verified: `npm test` 2/2, production build, all demo paths via live API, MCP probe push/pull (see [docs/implementation.md](docs/implementation.md))
+- [x] Repo pushed by user to https://github.com/DigitoBrain/Global-AI-Hackathon-Tribe
+- [ ] Remaining: clean-clone test, demo video recording, submission form copy, team/acceptance facts for submission
 
-Workspace at last check contained only `tribe.md` (plus tooling dirs). There is no app code yet.
+Workspace now contains the full app (`src/`, `server/`, `mcp/`, `scripts/`, `tests/`, `data/` ignored DB). Untracked user files `conversation-2026-10-30-185227.txt` and `muse-session.txt` are not part of the project — leave them uncommitted.
 
 ## Decisions already made (do not re-decide silently)
 
@@ -56,6 +58,7 @@ See [docs/decisions.md](docs/decisions.md) for rationale. Summary:
 10. **D-010 Guardrails:** negative knowledge (never-run commands, never-grant access, avoided actions) first-class, scoped/expiring, interrupts at moment of temptation.
 11. **D-011 Attempt log:** accepted/rejected code & config changes incl. uncommitted test failures (what/where/logs/verdict/why) to prevent repeats.
 12. **D-012 Positioning:** tribal knowledge ≠ memory system; mem0/letta/zeph/notion may be internal components. See [docs/positioning.md](docs/positioning.md) scenarios S-1…S-10.
+13. **D-013 Stack:** React web + Node/Express + SQLite + TS MCP SDK; Expo deferred to roadmap. Meta key live (`muse-spark-1.3`).
 
 ## The plan (canonical copy)
 
@@ -71,19 +74,18 @@ Full plan: [docs/plan.md](docs/plan.md). Execution steps in order:
 
 ## How a new session should resume
 
-1. Read this file, [docs/decisions.md](docs/decisions.md), [docs/plan.md](docs/plan.md), [tribe.md](tribe.md).
-2. Check current workspace state (`git status` / file listing) — it may have advanced beyond this snapshot.
-3. Ask user only: "Ready for me to execute the plan in docs/plan.md, or change anything first?" — unless user already said `go`.
-4. If executing: follow [docs/plan.md](docs/plan.md) steps in order; update the **Current status** checklist above and [docs/decisions.md](docs/decisions.md) as you go (append, don't rewrite decided items).
-5. Keep this file's "Last updated" and status current after each major step so the next handoff is lossless.
+1. Read this file, [docs/implementation.md](docs/implementation.md), [docs/decisions.md](docs/decisions.md), [docs/plan.md](docs/plan.md), [tribe.md](tribe.md).
+2. Check current workspace state (`git status` / `git log` / file listing) — it may have advanced beyond this snapshot.
+3. Run the app (`npm install --cache .npm-cache`, `npm run build`, `npm start` → http://localhost:8787) and confirm `/api/health` before changing code.
+4. Continue with "What remains before submission" in [docs/implementation.md](docs/implementation.md); update the **Current status** checklist above and [docs/decisions.md](docs/decisions.md) as you go (append, don't rewrite decided items).
+5. Keep this file's "Last updated" and status current after each major step so the next handoff is lossless. Never read/print `app_key.txt` or `.env.local` values.
 
 ## Open questions / blockers
 
-- Meta Model API: key obtained? Which exact endpoint/model IDs were issued to this participant? (Blocks "real Meta run in demo video", not building.)
+- ~~Meta Model API key/endpoint~~ Resolved 2026-10-31: key in `.env.local`, `https://api.meta.ai/v1`, `muse-spark-1.3`, live-verified.
 - Is the user already accepted into the hackathon, or is an application still to be submitted? (Application deadline was Oct 25, 11:59 PM ET per event page; cap 20,000.)
 - Solo build, or are there teammates to list in the submission?
 - Demo video: who records/narrates, and on what machine?
-- Any preferred stack constraint from the user? (Plan currently leaves framework choice to implementation, favouring what runs locally with least setup.)
 
 ## Sources checked this session
 
@@ -93,4 +95,4 @@ Full plan: [docs/plan.md](docs/plan.md). Execution steps in order:
 
 ## Exact next action
 
-Wait for user to reply `go` (or plan changes), then execute Step 1 of [docs/plan.md](docs/plan.md).
+Clean-clone test → demo video → submission copy, per "What remains before submission" in [docs/implementation.md](docs/implementation.md).

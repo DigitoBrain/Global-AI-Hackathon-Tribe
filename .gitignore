@@ -1,0 +1,9 @@
+﻿node_modules/
+dist/
+.env
+.env.local
+app_key.txt
+data/*.db
+data/*.db-*
+*.log
+.npm-cache/
