@@ -5,13 +5,15 @@ import {
   listMemories, getMemory, createMemory, updateMemory, addFeedback, verifyMemory,
   listSessions, getSession, createSession, updateSession, attachMemory, detachMemory,
   addOpenQuestion, evolutionChain, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
-  listMessages, sessionChat,
+  listMessages, sessionChat, repoRoot, promoteMessage, createLink,
+  enrichMemoryKeys, evolveIndex, backfillKeys,
 } from "./store.mjs";
 import { seedIfEmpty, resetSeed } from "./seed.mjs";
 import { llmStatus, llmConfig } from "./llm.mjs";
 import { scrubSecrets } from "./scrub.mjs";
 
 seedIfEmpty();
+backfillKeys();
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 const PORT = process.env.PORT || 8787;
@@ -21,11 +23,12 @@ app.get("/api/health", async (_req, res) => {
   res.json({ ok: true, llm, model: llmConfig.model, note: llm.live ? "Meta Model API live" : "Offline deterministic mode (Meta key missing or rejected)" });
 });
 app.get("/api/memories", (_req, res) => res.json(listMemories().map(withMeta)));
-app.post("/api/memories", (req, res) => {
+app.post("/api/memories", async (req, res) => {
   if (!req.body?.body) return res.status(400).json({ error: "body is required" });
   const out = createMemory(req.body);
   if (req.body.sessionId) attachMemory(Number(req.body.sessionId), out.memory.id);
-  res.status(201).json(out);
+  const enriched = await enrichMemoryKeys(out.memory.id);
+  res.status(201).json({ ...out, memory: enriched ? withMeta(enriched) : out.memory });
 });
 app.patch("/api/memories/:id", (req, res) => {
   const m = updateMemory(Number(req.params.id), req.body || {});
@@ -82,6 +85,22 @@ app.get("/api/sessions/:id/brief", async (req, res) => {
   const s = getSession(Number(req.params.id));
   return s ? res.json(await compileBriefSmart(s)) : res.status(404).json({ error: "not found" });
 });
+app.post("/api/sessions/:id/messages/:messageId/promote", async (req, res) => {
+  const out = promoteMessage(Number(req.params.id), Number(req.params.messageId));
+  if (!out) return res.status(404).json({ error: "message not found" });
+  if (!out.already) await enrichMemoryKeys(out.memory.id);
+  const fresh = getMemory(out.memory.id);
+  return res.status(out.already ? 200 : 201).json({ ...out, memory: fresh ? withMeta(fresh) : out.memory });
+});
+app.post("/api/sessions/:id/evolve", async (req, res) => {
+  if (!req.body?.question?.trim()) return res.status(400).json({ error: "question is required" });
+  res.json(await evolveIndex(req.body.question.trim(), Number(req.params.id)));
+});
+app.post("/api/memories/:id/links", (req, res) => {
+  const kind = ["related", "supports", "contradicts", "supersedes", "derived_from"].includes(req.body?.kind) ? req.body.kind : "related";
+  const links = createLink(Number(req.params.id), Number(req.body?.toId), kind);
+  return links ? res.status(201).json({ links }) : res.status(400).json({ error: "valid from/to memories required" });
+});
 app.post("/api/ask", async (req, res) => {
   if (!req.body?.question) return res.status(400).json({ error: "question is required" });
   res.json(await groundedAsk(req.body.question, req.body.sessionId ? Number(req.body.sessionId) : null));
@@ -90,7 +109,7 @@ app.post("/api/guardrail-check", (req, res) => res.json(guardrailCheck(req.body?
 app.post("/api/scrub-preview", (req, res) => res.json(scrubSecrets(req.body?.text || "")));
 app.post("/api/reset", (_req, res) => { resetSeed(); res.json({ ok: true }); });
 
-const dist = path.join(process.cwd(), "dist");
+const dist = path.join(repoRoot, "dist");
 if (fs.existsSync(dist)) {
   app.use(express.static(dist));
   app.get("*", (_req, res) => res.sendFile(path.join(dist, "index.html")));

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scrubSecrets } from "../server/scrub.mjs";
-import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup } from "../server/store.mjs";
+import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys } from "../server/store.mjs";
 
 test("scrub redacts api keys and bearer tokens", () => {
   const r = scrubSecrets("api_key=sk-test1234567890 and Bearer abcdefghijklmnop");
@@ -50,4 +50,20 @@ test("chat follow-ups inherit context only when referential", () => {
   assert.equal(isReferentialFollowup("What about it?"), true);
   assert.equal(isReferentialFollowup("What is our office Wi-Fi password?"), false);
   assert.equal(isReferentialFollowup("What caused the checkout latency regression in the payments service last Tuesday?"), false);
+});
+
+test("multi-index fusion explains itself and learned keys make a memory findable", () => {
+  const pool = [
+    { id: 1, title: "Pool exhaustion notes", body: "database connections saturated", tags: ["checkout"], index_keys: ["why is checkout slow at peak traffic", "p95 latency spike"], confidence: 0.9, status: "active", updated_at: new Date().toISOString(), last_verified: new Date().toISOString() },
+  ];
+  const hits = searchMemories("why is checkout slow at peak traffic", pool);
+  assert.equal(hits.length, 1);
+  assert.ok(hits[0].signals.learned_keys > 0);
+  assert.ok(hits[0].why.some((w) => w.includes("learned keys")));
+  assert.ok(deterministicKeys("Checkout pool", "pool pool latency", ["checkout"]).includes("checkout"));
+});
+
+test("promoted memory title comes from the message, truncated safely", () => {
+  assert.equal(deriveMemoryTitle("Pool exhaustion caused it. More detail follows here."), "Pool exhaustion caused it.");
+  assert.ok(deriveMemoryTitle("x".repeat(200)).length <= 72);
 });

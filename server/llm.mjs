@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function loadEnv() {
   const env = { ...process.env };
-  const file = path.join(process.cwd(), ".env.local");
+  const file = path.join(repoRoot, ".env.local");
   if (fs.existsSync(file)) {
     for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
       const m = line.match(/^([^#=]+)=(.*)$/);

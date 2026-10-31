@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from "react";
 type Memory = {
   id: number; title: string; body: string; type: string; tags: string[];
   confidence: number; source: string; status: string; stale: boolean; versions: number;
-  last_verified: string; created_at?: string;
+  last_verified: string; created_at?: string; connections?: Connection[]; index_keys?: string[];
 };
 type Session = { id: number; title: string; status: string; open_questions: string[] };
-type Citation = { n: number; title: string; status: string; stale?: boolean; at?: string };
-type Message = { id: number; role: string; content: string; citations: Citation[]; created_at: string };
+type Citation = { n: number; title: string; status: string; stale?: boolean; at?: string; why?: string[] };
+type Message = { id: number; role: string; content: string; citations: Citation[]; created_at: string; promoted_memory_id?: number | null };
+type Connection = { memory_id: number; title: string; kind: string; direction: string };
 type Brief = { summary: string; llm?: string; memory_count: number; open_questions: string[] };
 
 const api = async (path: string, opts?: RequestInit) => {
@@ -35,6 +36,7 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [filter, setFilter] = useState("all");
   const [share, setShare] = useState("");
+  const [linkPick, setLinkPick] = useState<Record<number, { toId: number; kind: string }>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const current = sessions.find((s) => s.id === sessionId);
@@ -130,10 +132,24 @@ export default function App() {
 
         <div className="chat">
           {messages.length === 0 && <div className="bubble assistant">This is your context session — ask anything. Answers are grounded in the memories attached to this session, cite their sources, and say “I don’t know” when there is no evidence. Try a suggestion below.</div>}
-          {messages.map((m) => (
+          {messages.map((m, idx) => (
             <div key={m.id} className={`bubble ${m.role}`}>
               <p>{m.content}</p>
-              {m.citations?.length > 0 && <p className="meta">Sources: {m.citations.map((c) => `[${c.n}] ${c.title}${c.at ? ` (${c.at.slice(0, 10)})` : ""}`).join(" · ")}</p>}
+              {m.citations?.length > 0 && <p className="meta">Sources: {m.citations.map((c) => `[${c.n}] ${c.title}${c.at ? ` (${c.at.slice(0, 10)})` : ""}${c.why?.length ? ` — ${c.why.join("; ")}` : ""}`).join(" · ")}</p>}
+              <div className="bubble-actions">
+                {m.role === "assistant" && m.content.startsWith("I don't know") && sessionId && (() => {
+                  const prevUser = [...messages.slice(0, idx)].reverse().find((x) => x.role === "user");
+                  return prevUser ? <button onClick={async () => {
+                    const r = await api(`/api/sessions/${sessionId}/evolve`, { method: "POST", body: JSON.stringify({ question: prevUser.content }) });
+                    setNotice(r.evolved
+                      ? `Index evolved: “${r.results.find((x: { validated: boolean }) => x.validated)?.title}” learned new keys for that question (validated — the question now retrieves it). Ask again.`
+                      : "Tried to improve findability, but no revision passed validation, so the index was left unchanged.");
+                  }}>Improve findability for this question</button> : null;
+                })()}
+                {m.promoted_memory_id
+                  ? <span className="meta">Saved as memory #{m.promoted_memory_id} ✓</span>
+                  : <button onClick={async () => { if (sessionId) { const r = await api(`/api/sessions/${sessionId}/messages/${m.id}/promote`, { method: "POST" }); setNotice(`Saved as memory #${r.memory.id} — now part of this session's knowledge, linked to its sources.`); load(); } }}>Save as memory</button>}
+              </div>
             </div>
           ))}
           {sending && <div className="bubble assistant">Thinking from this session’s memories…</div>}
@@ -166,6 +182,19 @@ export default function App() {
               <p>{m.body}</p>
               <p className="meta">confidence {m.confidence.toFixed(2)} · verified {ago(m.last_verified)} · {m.versions} past version(s) · via {m.source}
                 {m.stale && m.status === "active" ? " · STALE — check before obeying" : ""}{m.status !== "active" ? ` · ${m.status.toUpperCase()}` : ""}</p>
+              {m.index_keys && m.index_keys.length > 0 && <p className="meta">Findable via: {m.index_keys.slice(0, 6).join(" · ")}{m.index_keys.length > 6 ? ` · +${m.index_keys.length - 6} more` : ""}</p>}
+              {m.connections && m.connections.length > 0 && <p className="meta">Connections: {m.connections.map((c, i) => <span key={i}>{c.direction === "to" ? `${c.kind} → ${c.title}` : `${c.title} —${c.kind}→ this`}{i < (m.connections?.length || 0) - 1 ? " · " : ""}</span>)}</p>}
+              <div className="row">
+                <select value={linkPick[m.id]?.toId || ""} onChange={(e) => setLinkPick({ ...linkPick, [m.id]: { toId: Number(e.target.value), kind: linkPick[m.id]?.kind || "related" } })}>
+                  <option value="">Connect to…</option>
+                  {memories.filter((x) => x.id !== m.id).map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
+                </select>
+                <select value={linkPick[m.id]?.kind || "related"} onChange={(e) => setLinkPick({ ...linkPick, [m.id]: { toId: linkPick[m.id]?.toId || 0, kind: e.target.value } })}>
+                  <option value="related">related</option><option value="supports">supports</option>
+                  <option value="contradicts">contradicts</option><option value="supersedes">supersedes</option>
+                </select>
+                <button onClick={async () => { const p = linkPick[m.id]; if (p?.toId) { await api(`/api/memories/${m.id}/links`, { method: "POST", body: JSON.stringify({ toId: p.toId, kind: p.kind }) }); load(); } }}>Link</button>
+              </div>
               <div className="row">
                 <button onClick={() => toggleAttach(m)}>{attachedIds.includes(m.id) ? "In this session ✓ — remove" : "Add to session"}</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "up" }) }); load(); }}>Useful</button>

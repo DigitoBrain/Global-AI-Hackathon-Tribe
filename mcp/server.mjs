@@ -3,11 +3,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   getSession, listSessions, createSession, createMemory, attachMemory,
-  compileBrief, listMessages, addMessage,
+  compileBrief, listMessages, addMessage, enrichMemoryKeys, backfillKeys,
 } from "../server/store.mjs";
 import { seedIfEmpty } from "../server/seed.mjs";
 
 seedIfEmpty();
+backfillKeys();
 const server = new McpServer({ name: "tribe", version: "0.2.0" });
 const text = (t) => ({ content: [{ type: "text", text: t }] });
 
@@ -41,6 +42,7 @@ server.tool("push_context",
   async ({ title, body, type, session_id }) => {
     const { memory, redactions } = createMemory({ title, body, type: type || "note", source: "mcp" });
     if (session_id) attachMemory(session_id, memory.id);
+    await enrichMemoryKeys(memory.id);
     return text(`Stored memory #${memory.id}: ${memory.title}${session_id ? ` (attached to session ${session_id})` : ""} (secret redactions: ${redactions})`);
   });
 

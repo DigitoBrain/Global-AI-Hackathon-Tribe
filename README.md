@@ -6,13 +6,15 @@ Built for the Meta Global AI Developer Hackathon (Indie track, *Build for Your W
 
 ## Run it
 
+Prerequisite: **Node.js 22.5 or newer** (Tribe uses the built-in `node:sqlite`). Check with `node --version`.
+
 ```bash
 npm install --cache .npm-cache
 npm run build
 npm start
 ```
 
-Open http://localhost:8787 in your browser. For development with hot reload: `npm run dev` (web on http://localhost:5173).
+Open http://localhost:8787 in your browser. Port busy? Set `PORT` (e.g. `PORT=8788 npm start`). For development with hot reload: `npm run dev` (web on http://localhost:5173). A harmless `ExperimentalWarning: SQLite` line from Node is expected.
 
 No API key is required: Tribe runs in deterministic offline mode. With a Meta Model API key it uses Meta models live (see below).
 
@@ -31,16 +33,22 @@ The UI has three sections: **Capture**, **Context Session** (one chat), **Memori
 
 Use **Reset demo** to restore the seed data at any time.
 
-## MCP config (Claude Code / Cursor)
+## MCP config
+
+**VS Code (Copilot Chat, agent mode):** this repo already ships `.vscode/mcp.json`. Open it and click **Start** above the `tribe` server (or run `MCP: List Servers`), enable the Tribe tools in Copilot Chat's tool picker, then try: “Use Tribe to list my context sessions”, “Pull the context for that session and summarise where things stand”, “Push a finding to that session…”, “Append that to the session chat…”. Watch the finding appear in the web app.
+
+**Claude Code / Cursor:**
 
 ```json
-{ "mcpServers": { "tribe": { "command": "node", "args": ["mcp/server.mjs"], "cwd": "<path-to-this-repo>" } } }
+{ "mcpServers": { "tribe": { "command": "node", "args": ["<path-to-this-repo>/mcp/server.mjs"] } } }
 ```
+
+The server resolves its store from its own location, so the host's working directory does not matter, and no API key is needed for the MCP tools themselves.
 
 ## Architecture
 
 - React + Vite + TypeScript frontend, Node + Express API, SQLite (`node:sqlite`) in `data/tribe.db` — local-first, zero external services.
-- One shared store ([server/store.mjs](/C:/Users/Akash/OneDrive/Documents/Global-AI-Hackathon-Tribe/server/store.mjs)) powers the web API and the MCP server: Memory Engine, Context Sessions, Context Compiler, Grounded Ask with trust/recency ranking.
+- One shared store ([server/store.mjs](/C:/Users/Akash/OneDrive/Documents/Global-AI-Hackathon-Tribe/server/store.mjs)) powers the web API and the MCP server: Memory Engine, Context Sessions, Context Compiler, and chat grounded by multi-index retrieval — keyword, learned index keys, chronology, trust, link-graph, and session signals fused into one ranking, with a plain-language “why” on every citation and validated index evolution from failed questions.
 - Tests: `npm test` (secret scrubbing, retrieval / no-evidence behaviour).
 
 ## Roadmap (not in this MVP)

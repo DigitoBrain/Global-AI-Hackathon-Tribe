@@ -118,6 +118,21 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: Fewer sections, one mental model ("a chat that remembers, grounded in my memories"), and portability is the cross-surface promise (S-10) made concrete.
 - Consequences: Chat history is persisted per session (`messages` table); answers are session-scoped; `/api/ask` and `/api/evolution` remain as APIs but are no longer separate UI sections.
 
+## D-016 — Chat is not memory: promotion is an explicit user act; connections are explicit links
+
+- Status: Decided (user-directed, 2026-10-31); implemented same day
+- Decision: Context Session chat messages (user or assistant, web or MCP `append_chat`) are conversation only — persisted per session, never automatically Memories, and never part of the generally-available memory pool; grounding retrieves only Memories attached to the session. Any single message becomes a Memory only when the user clicks **Save as memory** on it (or uses Capture, which is an explicit filing act). Promotion attaches the new Memory to that session and records its origin.
+- Connections between Memories are a `links` table (`related|supports|contradicts|supersedes|derived_from`), updated three ways: (1) automatically on promotion — the new Memory links `derived_from` to every Memory the answer cited (or top related matches when uncited); (2) automatically by lifecycle — creating a `supersedes` link marks the target `superseded`; (3) manually — any Memory can be linked to any other from its card in the UI. Seed runbook→old-runbook supersession is stored as a real link. Links are shown on Memory cards; retrieval/evolution still also use tags, status, and chronology.
+- Why: A chat that silently files everything recreates the filing mess and pollutes trusted knowledge with half-formed exchange; tribal knowledge should enter the pool by a person's decision, with provenance of where it came from and what it derived from.
+- Consequences: Chat can be freely exploratory; the Memory list stays curated. Future work: suggest-promotion prompts ("save this answer?") may pre-fill but never auto-save, and contradiction links should surface in answers.
+
+## D-017 — Multi-index retrieval with fused, explainable ranking; self-evolving index keys
+
+- Status: Decided (user-directed, 2026-10-31); implemented same day
+- Decision: Retrieval is not one index. Each Memory is scored by independent signals — keyword (title/body/tags), learned index keys, chronology (last-verified recency), trust (confidence gated by stale/superseded status), graph authority (incoming links), and session membership — then fused into one ranking. Every citation carries a plain-language `why` ("matches pool, checkout · recently verified · in this session · found via learned keys"), shown in the chat UI. Separately, each Memory carries an evolving `index_keys` representation (seeded deterministically, enriched by the Meta model at capture/promotion): when a question fails, **Improve findability** proposes revised keys for candidate memories, and a revision is stored only after validation — the failed question must now retrieve that memory, and a guard question must still retrieve it too. Every attempt (accepted or rejected) is logged in `index_evolutions`. Memory bodies are never rewritten by this loop; only findability metadata evolves. A proactive question-simulation stage (generating hypothetical future questions per memory and pre-validating retrieval against them) is designed but deferred to roadmap.
+- Why: Right knowledge in wrong phrasing is the most common retrieval failure; a single index cannot serve keyword, recency, trust, and relationship queries equally. Explainable fusion makes trust inspectable instead of asserted, and validated evolution improves findability without polluting curated knowledge.
+- Consequences: Semantic/embedding retrieval, if added later (e.g. a local embedding model), plugs in as one more signal in the fusion — not a rewrite. Demo may claim: multiple indexes, explainable citations, and an index that learns from failed questions under validation.
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace

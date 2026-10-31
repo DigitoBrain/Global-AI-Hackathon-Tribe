@@ -1,10 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const dbPath = () => path.join(repoRoot, "data", "tribe.db");
 const daysAgo = (d) => new Date(Date.now() - d * 864e5).toISOString();
 
 export function seedIfEmpty() {
-  const db = new DatabaseSync(path.join(process.cwd(), "data", "tribe.db"));
+  const db = new DatabaseSync(dbPath());
   const count = db.prepare("SELECT COUNT(*) c FROM memories").get().c;
   if (count > 0) { db.close(); return false; }
   const mem = db.prepare(
@@ -29,13 +32,17 @@ export function seedIfEmpty() {
   const sid = Number(s.lastInsertRowid);
   const link = db.prepare("INSERT INTO session_memories (session_id,memory_id) VALUES (?,?)");
   ids.forEach((id) => link.run(sid, id));
+  try {
+    db.prepare("INSERT OR IGNORE INTO links (from_id,to_id,kind,created_at) VALUES (?,?,?,?)")
+      .run(ids[0], ids[1], "supersedes", daysAgo(1));
+  } catch { /* links table created by store on server start */ }
   db.close();
   return true;
 }
 
 export function resetSeed() {
-  const db = new DatabaseSync(path.join(process.cwd(), "data", "tribe.db"));
-  db.exec("DELETE FROM session_memories; DELETE FROM sessions; DELETE FROM memories; DELETE FROM versions; DELETE FROM feedback; DELETE FROM messages;");
+  const db = new DatabaseSync(dbPath());
+  db.exec("DELETE FROM session_memories; DELETE FROM sessions; DELETE FROM memories; DELETE FROM versions; DELETE FROM feedback; DELETE FROM messages; DELETE FROM links;");
   db.close();
   return seedIfEmpty();
 }

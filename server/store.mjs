@@ -1,10 +1,14 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { scrubSecrets } from "./scrub.mjs";
 import { llmChat } from "./llm.mjs";
 
-const dataDir = path.join(process.cwd(), "data");
+// Resolve from this file (repo root), not process.cwd(), so the MCP server
+// works no matter which directory the host client (VS Code, Cursor) spawns it from.
+export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const dataDir = path.join(repoRoot, "data");
 fs.mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(path.join(dataDir, "tribe.db"));
 
@@ -37,11 +41,22 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL, content TEXT NOT NULL, citations TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, from_id INTEGER NOT NULL, to_id INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'related', created_at TEXT NOT NULL,
+  UNIQUE(from_id, to_id, kind)
+);
 `);
+try { db.exec("ALTER TABLE messages ADD COLUMN promoted_memory_id INTEGER"); } catch { /* already present */ }
+try { db.exec("ALTER TABLE memories ADD COLUMN index_keys TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
+db.exec(`CREATE TABLE IF NOT EXISTS index_evolutions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, memory_id INTEGER NOT NULL, question TEXT NOT NULL,
+  added_keys TEXT NOT NULL DEFAULT '[]', validated INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+);`);
 
 const now = () => new Date().toISOString();
 const daysAgo = (d) => new Date(Date.now() - d * 864e5).toISOString();
-const parse = (m) => ({ ...m, tags: JSON.parse(m.tags || "[]") });
+const parse = (m) => ({ ...m, tags: JSON.parse(m.tags || "[]"), index_keys: JSON.parse(m.index_keys || "[]") });
 
 export function listMemories() {
   return db.prepare("SELECT * FROM memories ORDER BY updated_at DESC").all().map(parse);
@@ -134,16 +149,49 @@ export async function sessionChat(sessionId, userText) {
   return { message: msg, dontKnow: result.dontKnow, temporal: Boolean(result.temporal) };
 }
 
+const KEY_STOP = new Set("the a an is are was were what why how do does did to of in on for and or it this that with when then than from into".split(" "));
+export function deterministicKeys(title, body, tags = []) {
+  const words = `${title} ${body}`.toLowerCase().split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 3 && !KEY_STOP.has(w));
+  const freq = new Map();
+  words.forEach((w) => freq.set(w, (freq.get(w) || 0) + 1));
+  const top = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([w]) => w);
+  return [...new Set([...(tags || []), title.toLowerCase(), ...top])].slice(0, 20);
+}
+
+export async function enrichMemoryKeys(id) {
+  const m = getMemory(id);
+  if (!m) return null;
+  const text = await llmChat(
+    "Generate searchable index keys for a knowledge memory. Reply with a JSON array of 8-12 short strings only: keywords, entities, and questions a user might ask that this memory answers. No prose.",
+    `Title: ${m.title}\nBody: ${m.body.slice(0, 800)}`);
+  let proposed = [];
+  if (text) { try { proposed = JSON.parse(text.slice(text.indexOf("["), text.lastIndexOf("]") + 1)); } catch { proposed = []; } }
+  const merged = [...new Set([...m.index_keys, ...proposed.filter((k) => typeof k === "string" && k.length < 90)])].slice(0, 30);
+  db.prepare("UPDATE memories SET index_keys=? WHERE id=?").run(JSON.stringify(merged), id);
+  return getMemory(id);
+}
+
+export function backfillKeys() {
+  for (const m of listMemories()) {
+    if (!m.index_keys?.length) {
+      db.prepare("UPDATE memories SET index_keys=? WHERE id=?")
+        .run(JSON.stringify(deterministicKeys(m.title, m.body, m.tags)), m.id);
+    }
+  }
+}
+
 export function createMemory(input) {
   const scrubbed = scrubSecrets(input.body || "");
   const t = now();
   const r = db.prepare(
-    `INSERT INTO memories (title,body,type,tags,confidence,source,status,supersedes_id,scope,severity,created_at,updated_at,last_verified)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    `INSERT INTO memories (title,body,type,tags,confidence,source,status,supersedes_id,scope,severity,created_at,updated_at,last_verified,index_keys)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     input.title || "Untitled memory", scrubbed.text, input.type || "note",
     JSON.stringify(input.tags || []), input.confidence ?? 0.8, input.source || "manual",
     input.status || "active", input.supersedes_id || null, input.scope || "",
-    input.severity || "", t, t, t);
+    input.severity || "", t, t, t,
+    JSON.stringify(input.index_keys?.length ? input.index_keys : deterministicKeys(input.title || "", scrubbed.text, input.tags || [])));
   const mem = getMemory(Number(r.lastInsertRowid));
   return { memory: mem, redactions: scrubbed.redactions };
 }
@@ -184,7 +232,52 @@ export function isStale(m) {
   return m.status !== "deprecated" && Date.now() - new Date(m.last_verified).getTime() > 30 * 864e5;
 }
 export function withMeta(m) {
-  return { ...m, stale: isStale(m), versions: versionCount(m.id) };
+  return { ...m, stale: isStale(m), versions: versionCount(m.id), connections: listLinksFor(m.id) };
+}
+
+export function createLink(fromId, toId, kind = "related") {
+  if (!getMemory(fromId) || !getMemory(toId) || fromId === toId) return null;
+  db.prepare("INSERT OR IGNORE INTO links (from_id,to_id,kind,created_at) VALUES (?,?,?,?)")
+    .run(fromId, toId, kind, now());
+  if (kind === "supersedes") {
+    db.prepare("UPDATE memories SET supersedes_id=?,updated_at=? WHERE id=?").run(toId, now(), fromId);
+    db.prepare("UPDATE memories SET status='superseded',updated_at=? WHERE id=?").run(now(), toId);
+  }
+  return listLinksFor(fromId);
+}
+
+export function listLinksFor(memoryId) {
+  const out = db.prepare(
+    `SELECT l.kind, m.id, m.title FROM links l JOIN memories m ON m.id=l.to_id WHERE l.from_id=?`).all(memoryId)
+    .map((r) => ({ memory_id: r.id, title: r.title, kind: r.kind, direction: "to" }));
+  const inc = db.prepare(
+    `SELECT l.kind, m.id, m.title FROM links l JOIN memories m ON m.id=l.from_id WHERE l.to_id=?`).all(memoryId)
+    .map((r) => ({ memory_id: r.id, title: r.title, kind: r.kind, direction: "from" }));
+  return [...out, ...inc];
+}
+
+export function deriveMemoryTitle(content) {
+  const first = String(content).replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0] || "Session memory";
+  return first.length > 72 ? `${first.slice(0, 69)}…` : first;
+}
+
+export function promoteMessage(sessionId, messageId) {
+  const msg = db.prepare("SELECT * FROM messages WHERE id=? AND session_id=?").get(messageId, sessionId);
+  if (!msg) return null;
+  if (msg.promoted_memory_id) return { memory: withMeta(getMemory(msg.promoted_memory_id)), already: true };
+  const { memory } = createMemory({
+    title: deriveMemoryTitle(msg.content), body: msg.content,
+    type: "note", source: "context-session", tags: [],
+  });
+  attachMemory(sessionId, memory.id);
+  const citations = JSON.parse(msg.citations || "[]");
+  for (const c of citations) if (c.memory_id) createLink(memory.id, c.memory_id, "derived_from");
+  if (!citations.length) {
+    const related = searchMemories(msg.content, listMemories().filter((m) => m.id !== memory.id)).slice(0, 2);
+    for (const r of related) createLink(memory.id, r.memory.id, "related");
+  }
+  db.prepare("UPDATE messages SET promoted_memory_id=? WHERE id=?").run(memory.id, messageId);
+  return { memory: withMeta(getMemory(memory.id)), already: false };
 }
 
 export function compileBrief(session) {
@@ -215,18 +308,50 @@ export async function compileBriefSmart(session) {
   return brief;
 }
 
-const STOP = new Set("the a an is are was were what why how do does did to of in on for and or it this that with".split(" "));
-export function searchMemories(query, pool) {
-  const terms = [...new Set(String(query).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w)))];
+const STOP = new Set("the a an is are was were what why how do does did to of in on for and or it this that with when who which where there their about would could should our".split(" "));
+const tok = (s) => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+// Multi-index retrieval: independent signals are scored separately, then fused.
+// Signals: keyword (title/body/tags), learned keys (evolving index), chronology
+// (last-verified recency), trust (confidence, gated by status), graph authority
+// (incoming links/citations), session (membership in the active session pool).
+export function searchMemories(query, pool, opts = {}) {
+  const terms = [...new Set(tok(query).filter((w) => w && !STOP.has(w)))];
+  const usable = terms.filter((t) => t.length >= 3);
   return pool.map((m) => {
-    const hayTokens = new Set(`${m.title} ${m.body} ${(m.tags || []).join(" ")}`.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
-    const hits = terms.filter((t) => t.length >= 3 && hayTokens.has(t)).length;
-    const recency = Math.max(0, 1 - (Date.now() - new Date(m.last_verified || m.updated_at).getTime()) / (90 * 864e5));
-    let score = hits * 2 + recency * 1.5 + m.confidence * 0.5;
+    const hayTokens = new Set(tok(`${m.title} ${m.body} ${(m.tags || []).join(" ")}`));
+    const keyTokens = new Set(tok((m.index_keys || []).join(" ")));
+    const bodyHits = usable.filter((t) => hayTokens.has(t));
+    const keyHits = usable.filter((t) => !hayTokens.has(t) && keyTokens.has(t));
+    const hits = bodyHits.length + keyHits.length;
+    const signals = {
+      keyword: usable.length ? bodyHits.length / usable.length : 0,
+      learned_keys: usable.length ? keyHits.length / usable.length : 0,
+      chronology: Math.max(0, 1 - (Date.now() - new Date(m.last_verified || m.updated_at).getTime()) / (90 * 864e5)),
+      trust: m.confidence ?? 0.5,
+      graph: Math.min(((opts.graph?.get(m.id)) || 0) / 3, 1),
+      session: opts.sessionIds?.has(m.id) ? 1 : 0,
+    };
+    let score = signals.keyword * 3 + signals.learned_keys * 2.5 + signals.chronology * 1.2
+      + signals.trust * 0.8 + signals.graph * 0.6 + signals.session * 0.4 + hits * 0.5;
     if (m.status === "stale" || isStale(m)) score -= 0.7;
     if (m.status === "deprecated" || m.status === "superseded") score -= 5;
-    return { memory: m, hits, score: Number(score.toFixed(2)) };
+    const why = [];
+    if (bodyHits.length) why.push(`matches ${bodyHits.slice(0, 4).join(", ")}`);
+    if (keyHits.length) why.push(`found via learned keys: ${keyHits.slice(0, 3).join(", ")}`);
+    if (signals.chronology > 0.8) why.push("recently verified");
+    else if (m.status === "active" && isStale(m)) why.push("stale — demoted");
+    if (signals.graph > 0) why.push("linked from other memories");
+    if (signals.session) why.push("in this session");
+    if (m.status === "superseded") why.push("superseded — history only");
+    return { memory: m, hits, score: Number(score.toFixed(2)), signals, why };
   }).filter((r) => r.hits > 0).sort((a, b) => b.score - a.score);
+}
+
+export function graphAuthority() {
+  const map = new Map();
+  for (const row of db.prepare("SELECT to_id, COUNT(*) c FROM links GROUP BY to_id").all()) map.set(row.to_id, row.c);
+  return map;
 }
 
 export function isTemporalQuery(query) {
@@ -245,7 +370,10 @@ const fmtDate = (iso) => new Date(iso).toISOString().slice(0, 10);
 
 export async function groundedAsk(query, sessionId) {
   const pool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
-  const ranked = searchMemories(query, pool);
+  const ranked = searchMemories(query, pool, {
+    graph: graphAuthority(),
+    sessionIds: sessionId ? new Set(pool.map((m) => m.id)) : new Set(),
+  });
   if (!ranked.length || ranked[0].hits === 0) {
     return { answer: "I don't know. No memory in Tribe covers this, so I won't guess. Capture it as a memory once you find out.", citations: [], dontKnow: true };
   }
@@ -264,13 +392,50 @@ export async function groundedAsk(query, sessionId) {
     return { answer, citations, dontKnow: answer.startsWith("I don't know"), temporal: true };
   }
   const top = ranked.slice(0, 3);
-  const citations = top.map((r, i) => ({ n: i + 1, memory_id: r.memory.id, title: r.memory.title, status: r.memory.status, stale: r.memory.stale, at: r.memory.created_at }));
+  const citations = top.map((r, i) => ({ n: i + 1, memory_id: r.memory.id, title: r.memory.title, status: r.memory.status, stale: r.memory.stale, at: r.memory.created_at, why: r.why, signals: r.signals }));
   const evidence = top.map((r, i) => `[${i + 1}] ${r.memory.title} (${r.memory.type}, confidence ${r.memory.confidence.toFixed(2)}): ${r.memory.body}`).join("\n");
   const llmText = await llmChat(
     "Answer only from the evidence. Cite like [1]. If evidence is insufficient, say exactly: I don't know.",
     `Question: ${query}\nEvidence:\n${evidence}`);
   const answer = llmText || top.map((r, i) => `${r.memory.body.split(".")[0]}. [${i + 1}]`).join(" ");
   return { answer, citations, dontKnow: answer.startsWith("I don't know"), ranked: top.map((r) => ({ memory_id: r.memory.id, score: r.score })) };
+}
+
+// Self-evolving index: learn from a failed question by revising a memory's
+// index keys — but a revision is stored only if validation shows the failed
+// question now retrieves that memory and a guard question still retrieves it too.
+export async function evolveIndex(question, sessionId) {
+  const pool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
+  const opts = { graph: graphAuthority(), sessionIds: new Set(pool.map((m) => m.id)) };
+  const before = searchMemories(question, pool, opts);
+  const candidates = pool.filter((m) => m.status === "active")
+    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 4);
+  const results = [];
+  for (const cand of candidates) {
+    const llmText = await llmChat(
+      "Propose 5 short index keys (phrases or likely user questions) under which this memory should be findable, given a user question it failed to answer. Reply with a JSON array of strings only.",
+      `Failed question: ${question}\nMemory title: ${cand.title}\nMemory body: ${cand.body.slice(0, 600)}`);
+    let proposed = [];
+    if (llmText) { try { proposed = JSON.parse(llmText.slice(llmText.indexOf("["), llmText.lastIndexOf("]") + 1)); } catch { proposed = []; } }
+    if (!proposed.length) proposed = [question];
+    const newKeys = [...new Set([...cand.index_keys, ...proposed.filter((k) => typeof k === "string" && k.length < 90)])].slice(0, 30);
+    const trialPool = pool.map((m) => m.id === cand.id ? { ...m, index_keys: newKeys } : m);
+    const after = searchMemories(question, trialPool, opts);
+    const guardQ = `what is ${cand.title}`;
+    const guardAfter = searchMemories(guardQ, trialPool, opts);
+    const improved = after.length && after[0].memory.id === cand.id;
+    const noRegress = guardAfter.some((r) => r.memory.id === cand.id);
+    const validated = Boolean(improved && noRegress);
+    db.prepare("INSERT INTO index_evolutions (memory_id,question,added_keys,validated,created_at) VALUES (?,?,?,?,?)")
+      .run(cand.id, question, JSON.stringify(proposed), validated ? 1 : 0, now());
+    if (validated) {
+      db.prepare("UPDATE memories SET index_keys=?,updated_at=? WHERE id=?").run(JSON.stringify(newKeys), now(), cand.id);
+      results.push({ memory_id: cand.id, title: cand.title, added_keys: proposed, validated: true });
+      break; // one validated evolution per failed question keeps the index conservative
+    }
+    results.push({ memory_id: cand.id, title: cand.title, added_keys: proposed, validated: false });
+  }
+  return { question, before_hits: before.length, results, evolved: results.some((r) => r.validated) };
 }
 
 export function guardrailCheck(action) {

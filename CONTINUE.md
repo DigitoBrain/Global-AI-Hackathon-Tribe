@@ -38,7 +38,8 @@ We are building a hackathon MVP slice of that vision, not the whole platform.
 - [x] Meta Model API key configured in `.env.local` (git-ignored) and live-verified with `muse-spark-1.3`
 - [x] Verified: `npm test` 2/2, production build, all demo paths via live API, MCP probe push/pull (see [docs/implementation.md](docs/implementation.md))
 - [x] Repo pushed by user to https://github.com/DigitoBrain/Global-AI-Hackathon-Tribe
-- [ ] Remaining: clean-clone test, demo video recording, submission form copy, team/acceptance facts for submission
+- [x] Clean-clone test passed 2026-10-31 (offline + Meta modes, MCP tools listed; Node ≥22.5 + PORT friction fixed in README)
+- [ ] Remaining: demo video recording, submission form copy, team/acceptance facts for submission
 
 Workspace now contains the full app (`src/`, `server/`, `mcp/`, `scripts/`, `tests/`, `data/` ignored DB). Untracked user files `conversation-2026-10-30-185227.txt` and `muse-session.txt` are not part of the project — leave them uncommitted.
 
@@ -61,6 +62,8 @@ See [docs/decisions.md](docs/decisions.md) for rationale. Summary:
 13. **D-013 Stack:** React web + Node/Express + SQLite + TS MCP SDK; Expo deferred to roadmap. Meta key live (`muse-spark-1.3`).
 14. **D-014 Chronology (implemented 2026-10-31):** retrieval/answers newest-trusted-first; temporal questions get an evolution narrative; per-topic evolution view. See S-11 in [docs/positioning.md](docs/positioning.md). Sessions are also fully manageable in UI (create/switch/archive, attach/detach, open questions, session-scoped ask).
 15. **D-015 Simplified surface (implemented 2026-10-31):** exactly three UI sections — Capture, one chat-style Context Session (persistent, grounded; brief/guardrail/evolution inside the chat), Memories. Sessions travel via MCP (`list_sessions`/`create_session`/`pull_context`/`push_context`/`append_chat`) for IDE continuation.
+16. **D-016 Promotion gate + links (implemented 2026-10-31):** chat messages are never auto-Memories; **Save as memory** on any bubble promotes it (attached to session, `derived_from` links to cited sources). Memory connections are an explicit `links` table (manual / lifecycle / on-promote), shown on cards.
+17. **D-017 Multi-index + self-evolving keys (implemented 2026-10-31):** fused signals (keyword, learned keys, chronology, trust, graph, session) with plain-language `why` on every citation; failed questions can trigger validated index-key evolution (**Improve findability**) — bodies never auto-rewritten. Proactive question simulation is roadmap.
 
 ## The plan (canonical copy)
 
@@ -97,4 +100,4 @@ Full plan: [docs/plan.md](docs/plan.md). Execution steps in order:
 
 ## Exact next action
 
-Clean-clone test → demo video → submission copy, per "What remains before submission" in [docs/implementation.md](docs/implementation.md).
+MCP live proof with a real client → demo video → submission copy, per "What remains before submission" in [docs/implementation.md](docs/implementation.md).
