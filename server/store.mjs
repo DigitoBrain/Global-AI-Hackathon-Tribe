@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS feedback (
   id INTEGER PRIMARY KEY AUTOINCREMENT, memory_id INTEGER NOT NULL,
   signal TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL,
+  role TEXT NOT NULL, content TEXT NOT NULL, citations TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
 `);
 
 const now = () => new Date().toISOString();
@@ -56,6 +61,77 @@ export function getSession(id) {
     `SELECT m.* FROM memories m JOIN session_memories sm ON sm.memory_id=m.id
      WHERE sm.session_id=? ORDER BY m.created_at`).all(id).map(parse);
   return { ...s, open_questions: JSON.parse(s.open_questions || "[]"), memories };
+}
+
+export function createSession(title) {
+  const t = now();
+  const r = db.prepare("INSERT INTO sessions (title,status,open_questions,created_at,updated_at) VALUES (?,?,?,?,?)")
+    .run(title || "Untitled session", "active", "[]", t, t);
+  return getSession(Number(r.lastInsertRowid));
+}
+export function updateSession(id, input) {
+  const s = getSession(id);
+  if (!s) return null;
+  db.prepare("UPDATE sessions SET title=?,status=?,updated_at=? WHERE id=?")
+    .run(input.title ?? s.title, input.status ?? s.status, now(), id);
+  return getSession(id);
+}
+export function attachMemory(sessionId, memoryId) {
+  if (!getSession(sessionId) || !getMemory(memoryId)) return null;
+  db.prepare("INSERT OR IGNORE INTO session_memories (session_id,memory_id) VALUES (?,?)").run(sessionId, memoryId);
+  db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(now(), sessionId);
+  return getSession(sessionId);
+}
+export function detachMemory(sessionId, memoryId) {
+  if (!getSession(sessionId)) return null;
+  db.prepare("DELETE FROM session_memories WHERE session_id=? AND memory_id=?").run(sessionId, memoryId);
+  return getSession(sessionId);
+}
+export function addOpenQuestion(sessionId, question) {
+  const s = getSession(sessionId);
+  if (!s || !question?.trim()) return null;
+  const qs = [...s.open_questions, question.trim()];
+  db.prepare("UPDATE sessions SET open_questions=?,updated_at=? WHERE id=?").run(JSON.stringify(qs), now(), sessionId);
+  return getSession(sessionId);
+}
+
+export function isReferentialFollowup(text) {
+  const t = String(text).trim();
+  if (t.length > 80) return false;
+  return /^(and\b|why\b|what about\b|how so\b|tell me more\b|explain\b)/i.test(t)
+    || /\b(it|that|this|they|them|those)\b/i.test(t);
+}
+
+export function listMessages(sessionId) {
+  return db.prepare("SELECT * FROM messages WHERE session_id=? ORDER BY id").all(sessionId)
+    .map((m) => ({ ...m, citations: JSON.parse(m.citations || "[]") }));
+}
+export function addMessage(sessionId, role, content, citations = []) {
+  const r = db.prepare("INSERT INTO messages (session_id,role,content,citations,created_at) VALUES (?,?,?,?,?)")
+    .run(sessionId, role, content, JSON.stringify(citations), now());
+  return { id: Number(r.lastInsertRowid), session_id: sessionId, role, content, citations, created_at: now() };
+}
+
+export async function sessionChat(sessionId, userText) {
+  const session = getSession(sessionId);
+  if (!session) return null;
+  const history = listMessages(sessionId);
+  addMessage(sessionId, "user", userText);
+  const guard = guardrailCheck(userText);
+  if (guard.blocked) {
+    const msg = addMessage(sessionId, "assistant", guard.message,
+      guard.guardrails.map((g, i) => ({ n: i + 1, memory_id: g.id, title: g.title, status: g.status, at: g.created_at })));
+    return { message: msg, guardrail: true };
+  }
+  // Iterative chat: only a referential follow-up ("and why?", "what about it?") inherits the previous question's context.
+  const lastUser = [...history].reverse().find((m) => m.role === "user");
+  const retrievalQuery = lastUser && isReferentialFollowup(userText) ? `${lastUser.content} ${userText}` : userText;
+  const result = await groundedAsk(retrievalQuery, sessionId);
+  const answer = result.dontKnow && session.memories.length === 0
+    ? "This session has no memories yet. Capture one above (it is added to this session) or attach existing memories from the list below, then ask again."
+    : result.answer;
+  const msg = addMessage(sessionId, "assistant", answer, result.citations || []);
+  return { message: msg, dontKnow: result.dontKnow, temporal: Boolean(result.temporal) };
 }
 
 export function createMemory(input) {
@@ -145,13 +221,27 @@ export function searchMemories(query, pool) {
   return pool.map((m) => {
     const hayTokens = new Set(`${m.title} ${m.body} ${(m.tags || []).join(" ")}`.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
     const hits = terms.filter((t) => t.length >= 3 && hayTokens.has(t)).length;
-    const recency = Math.max(0, 1 - (Date.now() - new Date(m.updated_at).getTime()) / (90 * 864e5));
-    let score = hits * 2 + recency * 0.5 + m.confidence;
+    const recency = Math.max(0, 1 - (Date.now() - new Date(m.last_verified || m.updated_at).getTime()) / (90 * 864e5));
+    let score = hits * 2 + recency * 1.5 + m.confidence * 0.5;
     if (m.status === "stale" || isStale(m)) score -= 0.7;
     if (m.status === "deprecated" || m.status === "superseded") score -= 5;
     return { memory: m, hits, score: Number(score.toFixed(2)) };
   }).filter((r) => r.hits > 0).sort((a, b) => b.score - a.score);
 }
+
+export function isTemporalQuery(query) {
+  return /how (has|have|did)|changed|change over|evolv|history|used to|over time|why (do|is|are) (we|it)|this way now|previously|before we/i.test(String(query));
+}
+
+export function evolutionChain(pool, topic) {
+  const t = String(topic || "").toLowerCase().trim();
+  if (!t) return [];
+  return pool.filter((m) => (m.tags || []).some((x) => x.toLowerCase() === t)
+    || `${m.title} ${m.body}`.toLowerCase().includes(t))
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+}
+
+const fmtDate = (iso) => new Date(iso).toISOString().slice(0, 10);
 
 export async function groundedAsk(query, sessionId) {
   const pool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
@@ -159,8 +249,22 @@ export async function groundedAsk(query, sessionId) {
   if (!ranked.length || ranked[0].hits === 0) {
     return { answer: "I don't know. No memory in Tribe covers this, so I won't guess. Capture it as a memory once you find out.", citations: [], dontKnow: true };
   }
+  if (isTemporalQuery(query)) {
+    // Evolution mode: history included (superseded too), walked oldest -> current.
+    const topicTerms = ranked.slice(0, 2).flatMap((r) => r.memory.tags || []);
+    let chain = evolutionChain(pool, topicTerms[0] || "");
+    if (chain.length < 2) chain = [...ranked.map((r) => r.memory)].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const seen = new Set(); chain = chain.filter((m) => !seen.has(m.id) && seen.add(m.id)).slice(-6);
+    const citations = chain.map((m, i) => ({ n: i + 1, memory_id: m.id, title: m.title, status: m.status, stale: m.stale, at: m.created_at }));
+    const evidence = chain.map((m, i) => `[${i + 1}] (${fmtDate(m.created_at)}, ${m.type}/${m.status}) ${m.title}: ${m.body}`).join("\n");
+    const llmText = await llmChat(
+      "Explain how this knowledge evolved over time, oldest to current, citing like [1]. End with the current position. Use only the evidence; if insufficient, say exactly: I don't know.",
+      `Question: ${query}\nChronological evidence:\n${evidence}`);
+    const answer = llmText || chain.map((m, i) => `${fmtDate(m.created_at)} — ${m.title}: ${m.body.split(".")[0]}. [${i + 1}]`).join(" ");
+    return { answer, citations, dontKnow: answer.startsWith("I don't know"), temporal: true };
+  }
   const top = ranked.slice(0, 3);
-  const citations = top.map((r, i) => ({ n: i + 1, memory_id: r.memory.id, title: r.memory.title, status: r.memory.status, stale: r.memory.stale }));
+  const citations = top.map((r, i) => ({ n: i + 1, memory_id: r.memory.id, title: r.memory.title, status: r.memory.status, stale: r.memory.stale, at: r.memory.created_at }));
   const evidence = top.map((r, i) => `[${i + 1}] ${r.memory.title} (${r.memory.type}, confidence ${r.memory.confidence.toFixed(2)}): ${r.memory.body}`).join("\n");
   const llmText = await llmChat(
     "Answer only from the evidence. Cite like [1]. If evidence is insufficient, say exactly: I don't know.",

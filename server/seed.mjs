@@ -35,7 +35,7 @@ export function seedIfEmpty() {
 
 export function resetSeed() {
   const db = new DatabaseSync(path.join(process.cwd(), "data", "tribe.db"));
-  db.exec("DELETE FROM session_memories; DELETE FROM sessions; DELETE FROM memories; DELETE FROM versions; DELETE FROM feedback;");
+  db.exec("DELETE FROM session_memories; DELETE FROM sessions; DELETE FROM memories; DELETE FROM versions; DELETE FROM feedback; DELETE FROM messages;");
   db.close();
   return seedIfEmpty();
 }

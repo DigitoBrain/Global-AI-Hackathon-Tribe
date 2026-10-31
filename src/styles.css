@@ -39,3 +39,15 @@ code, pre { font-family: Consolas, monospace; font-size: 12px; }
 .card.dim { opacity: 0.62; }
 footer { margin-top: 20px; color: #5a665e; font-size: 13px; }
 ul { margin: 6px 0; padding-left: 18px; font-size: 13.5px; line-height: 1.6; }
+select { font: inherit; font-size: 13px; padding: 7px 8px; border: 1px solid #b9c4bc; border-radius: 6px; background: #fff; max-width: 100%; }
+label.check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; margin: 0 10px 8px 0; }
+label.check input { width: auto; margin: 0; }
+ul.evo { list-style: none; padding-left: 4px; }
+ul.evo li { padding: 7px 0; border-bottom: 1px solid #e3eae4; }
+.briefline { background: #f2f5f2; border-radius: 6px; padding: 10px 12px; font-size: 13.5px; line-height: 1.5; }
+.chat { max-height: 480px; overflow-y: auto; padding: 6px 2px; display: flex; flex-direction: column; gap: 10px; }
+.bubble { max-width: 82%; padding: 10px 13px; border-radius: 10px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
+.bubble p { margin: 0; }
+.bubble.user { align-self: flex-end; background: #205c40; color: #fff; }
+.bubble.assistant { align-self: flex-start; background: #eef2ee; }
+.composer input { margin-bottom: 0; }

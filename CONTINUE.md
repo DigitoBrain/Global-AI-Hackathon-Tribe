@@ -59,6 +59,8 @@ See [docs/decisions.md](docs/decisions.md) for rationale. Summary:
 11. **D-011 Attempt log:** accepted/rejected code & config changes incl. uncommitted test failures (what/where/logs/verdict/why) to prevent repeats.
 12. **D-012 Positioning:** tribal knowledge ≠ memory system; mem0/letta/zeph/notion may be internal components. See [docs/positioning.md](docs/positioning.md) scenarios S-1…S-10.
 13. **D-013 Stack:** React web + Node/Express + SQLite + TS MCP SDK; Expo deferred to roadmap. Meta key live (`muse-spark-1.3`).
+14. **D-014 Chronology (implemented 2026-10-31):** retrieval/answers newest-trusted-first; temporal questions get an evolution narrative; per-topic evolution view. See S-11 in [docs/positioning.md](docs/positioning.md). Sessions are also fully manageable in UI (create/switch/archive, attach/detach, open questions, session-scoped ask).
+15. **D-015 Simplified surface (implemented 2026-10-31):** exactly three UI sections — Capture, one chat-style Context Session (persistent, grounded; brief/guardrail/evolution inside the chat), Memories. Sessions travel via MCP (`list_sessions`/`create_session`/`pull_context`/`push_context`/`append_chat`) for IDE continuation.
 
 ## The plan (canonical copy)
 

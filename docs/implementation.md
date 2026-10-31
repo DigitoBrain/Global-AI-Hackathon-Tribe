@@ -29,7 +29,7 @@ TypeScript/React on the front, plain ESM Node on the back so the web API and MCP
 
 Data model (SQLite, `data/tribe.db`, git-ignored): `memories`, `versions`, `sessions`, `session_memories`, `feedback`. Seed = 6 memories (current runbook, superseded old runbook, root-cause decision, guardrail, rejected attempt, private note) in 1 session. `POST /api/reset` restores it.
 
-API surface: `GET /api/health`, `GET|POST /api/memories`, `PATCH /api/memories/:id`, `POST /api/memories/:id/feedback|verify`, `GET /api/sessions[/:id[/brief]]`, `POST /api/ask`, `POST /api/guardrail-check`, `POST /api/scrub-preview`, `POST /api/reset`.
+API surface: `GET /api/health`, `GET|POST /api/memories`, `PATCH /api/memories/:id`, `POST /api/memories/:id/feedback|verify`, `GET|POST /api/sessions`, `PATCH /api/sessions/:id`, `GET /api/sessions/:id[/brief]`, `POST|DELETE /api/sessions/:id/memories[/:memoryId]`, `POST /api/sessions/:id/questions`, `GET /api/evolution?tag=`, `POST /api/ask`, `POST /api/guardrail-check`, `POST /api/scrub-preview`, `POST /api/reset`.
 
 ## Meta Model API (live, verified)
 
@@ -62,9 +62,11 @@ Demo flow and judge instructions: [../README.md](../README.md). Reset-to-seed is
 ## Known limitations / honest caveats
 
 - Retrieval is keyword-based (no embeddings yet); ranking = keyword hits + recency + confidence with stale/deprecated demotion. Good enough for the seeded demo; semantic search is the first upgrade.
+- Simplified surface (D-015) implemented 2026-10-31: UI is exactly Capture → Context Session chat → Memories. Chat is persisted per session (`messages` table, `POST /api/sessions/:id/chat`), session-scoped and grounded, with referential follow-ups inheriting context (non-referential new questions do not — regression-tested), guardrail blocks and evolution answers inside the chat, brief reduced to a header line. MCP grew to `list_sessions`/`create_session`/`pull_context` (brief + recent chat)/`push_context` (session attach)/`append_chat` for IDE continuation; probe verifies create→push→pull→append. Verified live: cited chat answer, in-chat guardrail block, "I don't know", 6 persisted messages, empty-session guidance.
+- Chronology behaviour (D-014 / S-11) implemented 2026-10-31: ranking weights last-verified recency over confidence (superseded always last, stale demoted); temporal questions ("how has X changed", "why this way now") get an oldest→current evolution narrative over the full chain including superseded entries; `GET /api/evolution?tag=` + UI timeline panel show per-topic history. Sessions are manageable end-to-end: create/switch/archive-resume, attach/detach memories, add open questions, capture-into-session, session-vs-all ask scope — all verified live via the API, then reset to seed.
 - The web UI edits via API exist (PATCH) but the page exposes only feedback/verify/deprecate, not a full edit form or version-history viewer (cut-order items, D-007).
 - Share = generated snippet only; fork-on-receive is not implemented as a data operation.
-- One seeded session; sessions can be created in the DB/API layer only via seed code today (no create-session UI).
+- Still no full memory edit form or version-history viewer in the UI (API supports PATCH; versions are counted, not displayed).
 - `node:sqlite` prints an ExperimentalWarning on Node 24; harmless.
 
 ## What remains before submission (Nov 4, 9:00 PM ET)

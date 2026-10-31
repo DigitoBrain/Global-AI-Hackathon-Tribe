@@ -81,6 +81,9 @@ Git records only survivors. The config/code change that broke testing, was never
 ### S-10 Cross-surface day
 Same investigation touched in IDE (code), browser (docs/incident page), CLI (logs), MCP AI client. Context follows the person, not the tool. "Never rebuild context twice" ([../tribe.md](../tribe.md) Context Infrastructure).
 
+### S-11 Chronology — current answer first, evolution on demand
+Knowledge has a timeline, and the timeline is part of the answer. When Tribe retrieves, newer memories are considered first — an answer leads with the current position, not an equal-weight pile of old and new copies. But newer is not automatically truer: explicit supersession beats recency, verified beats unverified, and stale knowledge is demoted, not silently used. When the user asks how something changed — "what did we used to do?", "why is it done this way now?" — Tribe should walk the chain: original practice → what happened (incident, rejected attempt) → current verified practice, with dates. The same history powers an evolution view per topic: memories, their versions, and supersedes links shown as knowledge changing over time, not a flat list of snapshots. Git shows what survived in code; Tribe shows how what-we-know evolved, including the parts that were tried and abandoned. (Recorded 2026-10-31 as a desired use; implemented same day — see decisions D-014.)
+
 ## Product principles (from tribe.md §20, reaffirmed)
 
 Reduce cognitive load · Everything linkable · Knowledge evolves, not rots · AI explains with evidence, not hallucination (cite or say "I don't know") · Context shared, not recreated · Humans + AI collaborate through same persistent context · Simple UX, sophisticated internals · **Personal-first, collaboration when needed.**

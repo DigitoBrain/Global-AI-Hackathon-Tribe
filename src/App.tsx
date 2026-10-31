@@ -1,16 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Memory = {
   id: number; title: string; body: string; type: string; tags: string[];
   confidence: number; source: string; status: string; stale: boolean; versions: number;
-  last_verified: string; scope?: string; severity?: string;
+  last_verified: string; created_at?: string;
 };
-type Brief = {
-  summary: string; llm?: string; memory_count: number; entities: string[];
-  open_questions: string[]; timeline: { at: string; title: string; type: string; status: string }[];
-  guardrails: Memory[]; attempts: Memory[];
-};
-type AskResult = { answer: string; dontKnow: boolean; citations: { n: number; title: string; status: string; stale: boolean }[] };
+type Session = { id: number; title: string; status: string; open_questions: string[] };
+type Citation = { n: number; title: string; status: string; stale?: boolean; at?: string };
+type Message = { id: number; role: string; content: string; citations: Citation[]; created_at: string };
+type Brief = { summary: string; llm?: string; memory_count: number; open_questions: string[] };
 
 const api = async (path: string, opts?: RequestInit) => {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -21,38 +19,70 @@ const ago = (iso: string) => `${Math.max(0, Math.round((Date.now() - new Date(is
 
 export default function App() {
   const [memories, setMemories] = useState<Memory[]>([]);
-  const [brief, setBrief] = useState<Brief | null>(null);
-  const [health, setHealth] = useState<{ llm?: { mode: string }; note?: string } | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [brief, setBrief] = useState<Brief | null>(null);
+  const [attachedIds, setAttachedIds] = useState<number[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [health, setHealth] = useState<{ llm?: { mode: string } } | null>(null);
+  const [notice, setNotice] = useState("");
   const [dump, setDump] = useState("");
   const [dumpTitle, setDumpTitle] = useState("");
-  const [notice, setNotice] = useState("");
-  const [question, setQuestion] = useState("What caused the checkout latency regression?");
-  const [ask, setAsk] = useState<AskResult | null>(null);
-  const [action, setAction] = useState("kubectl delete pods -n prod checkout");
-  const [guard, setGuard] = useState<{ blocked: boolean; message: string } | null>(null);
-  const [share, setShare] = useState("");
+  const [intoSession, setIntoSession] = useState(true);
+  const [newTitle, setNewTitle] = useState("");
+  const [newQuestion, setNewQuestion] = useState("");
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
   const [filter, setFilter] = useState("all");
+  const [share, setShare] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  const load = async () => {
-    const [mems, sessions, h] = await Promise.all([api("/api/memories"), api("/api/sessions"), api("/api/health")]);
-    setMemories(mems); setHealth(h);
-    const sid = sessions[0]?.id ?? null; setSessionId(sid);
-    if (sid) setBrief(await api(`/api/sessions/${sid}/brief`));
+  const current = sessions.find((s) => s.id === sessionId);
+
+  const load = async (keepSid?: number | null) => {
+    const [mems, sess, h] = await Promise.all([api("/api/memories"), api("/api/sessions"), api("/api/health")]);
+    setMemories(mems); setSessions(sess); setHealth(h);
+    const wanted = keepSid !== undefined ? keepSid : sessionId;
+    const sid = wanted && sess.some((s: Session) => s.id === wanted) ? wanted : (sess[0]?.id ?? null);
+    setSessionId(sid);
+    if (sid) {
+      const [b, detail, msgs] = await Promise.all([
+        api(`/api/sessions/${sid}/brief`), api(`/api/sessions/${sid}`), api(`/api/sessions/${sid}/messages`)]);
+      setBrief(b); setAttachedIds((detail.memories || []).map((m: Memory) => m.id)); setMessages(msgs);
+    } else { setBrief(null); setAttachedIds([]); setMessages([]); }
   };
   useEffect(() => { load().catch((e) => setNotice(String(e))); }, []);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, sending]);
 
   const capture = async () => {
     if (!dump.trim()) return;
-    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, type: "note", source: "dump-box" }) });
-    setNotice(r.redactions ? `Captured. ${r.redactions} secret(s) redacted before storage.` : "Captured. Tribe filed it — no folder decision needed.");
+    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, type: "note", source: "dump-box", sessionId: intoSession ? sessionId : null }) });
+    setNotice(r.redactions ? `Captured and filed${intoSession && sessionId ? " into this session" : ""}. ${r.redactions} secret(s) redacted before storage.` : `Captured and filed${intoSession && sessionId ? " into this session" : ""} — no folder decision needed.`);
     setDump(""); setDumpTitle(""); load();
   };
-  const doAsk = async () => setAsk(await api("/api/ask", { method: "POST", body: JSON.stringify({ question, sessionId }) }));
-  const check = async () => setGuard(await api("/api/guardrail-check", { method: "POST", body: JSON.stringify({ action }) }));
-  const reset = async () => { await api("/api/reset", { method: "POST" }); setAsk(null); setGuard(null); setShare(""); load(); };
-  const makeShare = () => brief && setShare(
-    `Tribe share — Checkout latency\n${brief.summary}\nDo: check pool saturation, use rollout-restart wrapper.\nNever: kubectl delete pods in prod checkout.\nOpen: ${brief.open_questions.join(" ")}`);
+  const createSession = async () => {
+    if (!newTitle.trim()) return;
+    const s = await api("/api/sessions", { method: "POST", body: JSON.stringify({ title: newTitle.trim() }) });
+    setNewTitle(""); load(s.id);
+  };
+  const send = async (text?: string) => {
+    const message = (text ?? input).trim();
+    if (!message || !sessionId || sending) return;
+    setInput(""); setSending(true);
+    try {
+      await api(`/api/sessions/${sessionId}/chat`, { method: "POST", body: JSON.stringify({ message }) });
+      await load();
+    } catch (e) { setNotice(String(e)); } finally { setSending(false); }
+  };
+  const toggleAttach = async (m: Memory) => {
+    if (!sessionId) return;
+    if (attachedIds.includes(m.id)) await api(`/api/sessions/${sessionId}/memories/${m.id}`, { method: "DELETE" });
+    else await api(`/api/sessions/${sessionId}/memories`, { method: "POST", body: JSON.stringify({ memoryId: m.id }) });
+    load();
+  };
+  const makeShare = () => brief && current && setShare(
+    `Tribe session — ${current.title}\n${brief.summary}\nOpen: ${brief.open_questions.join(" ") || "—"}\n(Continue this session in any Tribe client, or via MCP: pull_context session ${sessionId})`);
+  const reset = async () => { await api("/api/reset", { method: "POST" }); setShare(""); load(null); };
   const shown = memories.filter((m) => filter === "all" || m.type === filter);
 
   return (
@@ -66,56 +96,65 @@ export default function App() {
       </header>
       {notice && <div className="notice">{notice}</div>}
 
-      <section className="panel capture">
+      <section className="panel">
         <h2>1 · Dump anything. Tribe files it.</h2>
         <input placeholder="Title (optional — Tribe will file it anyway)" value={dumpTitle} onChange={(e) => setDumpTitle(e.target.value)} />
-        <textarea rows={3} placeholder="Paste a log, snippet, decision, failure… try including api_key=sk-test1234567890 to see scrubbing" value={dump} onChange={(e) => setDump(e.target.value)} />
+        <textarea rows={3} placeholder="Paste a log, snippet, decision, failure… try including a fake api_key to see scrubbing" value={dump} onChange={(e) => setDump(e.target.value)} />
+        <label className="check"><input type="checkbox" checked={intoSession} onChange={(e) => setIntoSession(e.target.checked)} /> Add to current session</label>
         <button className="primary" onClick={capture}>Capture memory</button>
       </section>
 
-      <div className="grid">
-        <section className="panel">
-          <h2>2 · Compiled brief — Checkout latency regression</h2>
-          {!brief ? <p>Loading…</p> : <>
-            <p className="summary">{brief.summary}</p>
-            <p className="meta">{brief.memory_count} memories · compiled by {brief.llm === "meta" ? "Meta model" : "deterministic compiler"} · entities: {brief.entities.join(", ") || "—"}</p>
-            <h3>Timeline</h3>
-            <ul>{brief.timeline.map((t, i) => <li key={i}><code>{t.type}</code> {t.title} <span className="meta">({t.status}, {ago(t.at)})</span></li>)}</ul>
-            <h3>Open questions</h3>
-            <ul>{brief.open_questions.map((q, i) => <li key={i}>{q}</li>)}</ul>
-            <button onClick={makeShare}>Compile share slice (Slack-ready)</button>
-            {share && <pre className="share">{share}</pre>}
-          </>}
-        </section>
-
-        <section className="panel danger">
-          <h2>3 · Guardrail — what NOT to do</h2>
-          <input value={action} onChange={(e) => setAction(e.target.value)} />
-          <button className="danger-btn" onClick={check}>Check this action</button>
-          {guard && <p className={guard.blocked ? "blocked" : "clear"}>{guard.message}</p>}
-          <p className="meta">Seed guardrail: never delete checkout pods in prod — it bypassed the snapshot hook on Mar 3. Safe path: rollout-restart wrapper.</p>
-        </section>
-      </div>
-
-      <section className="panel">
-        <h2>4 · Grounded Ask — cited, or “I don’t know”</h2>
+      <section className="panel chat-panel">
+        <div className="row between">
+          <h2>2 · Context Session</h2>
+          <span className="meta">Grounded in this session’s memories · continues via MCP in your IDE</span>
+        </div>
         <div className="row">
-          <input className="grow" value={question} onChange={(e) => setQuestion(e.target.value)} />
-          <button className="primary" onClick={doAsk}>Ask Tribe</button>
+          <select value={sessionId ?? ""} onChange={(e) => load(Number(e.target.value))}>
+            {sessions.map((s) => <option key={s.id} value={s.id}>{s.title} ({s.status})</option>)}
+          </select>
+          <button onClick={async () => { if (current) { await api(`/api/sessions/${current.id}`, { method: "PATCH", body: JSON.stringify({ status: current.status === "active" ? "archived" : "active" }) }); load(); } }}>
+            {current?.status === "active" ? "Archive" : "Resume"}</button>
+          <button onClick={makeShare}>Share / continue elsewhere</button>
+        </div>
+        <div className="row">
+          <input className="grow" placeholder="New session — e.g. Payments timeout investigation" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+          <button onClick={createSession}>Create session</button>
+        </div>
+        {share && <pre className="share">{share}</pre>}
+        {brief && <p className="briefline"><strong>Brief:</strong> {brief.summary} <span className="meta">({brief.memory_count} memories{brief.open_questions.length ? ` · open: ${brief.open_questions.join(" ")}` : ""})</span></p>}
+        <div className="row">
+          <input className="grow" placeholder="Add an open question for this session" value={newQuestion} onChange={(e) => setNewQuestion(e.target.value)} />
+          <button onClick={async () => { if (newQuestion.trim() && sessionId) { await api(`/api/sessions/${sessionId}/questions`, { method: "POST", body: JSON.stringify({ question: newQuestion.trim() }) }); setNewQuestion(""); load(); } }}>Add question</button>
+        </div>
+
+        <div className="chat">
+          {messages.length === 0 && <div className="bubble assistant">This is your context session — ask anything. Answers are grounded in the memories attached to this session, cite their sources, and say “I don’t know” when there is no evidence. Try a suggestion below.</div>}
+          {messages.map((m) => (
+            <div key={m.id} className={`bubble ${m.role}`}>
+              <p>{m.content}</p>
+              {m.citations?.length > 0 && <p className="meta">Sources: {m.citations.map((c) => `[${c.n}] ${c.title}${c.at ? ` (${c.at.slice(0, 10)})` : ""}`).join(" · ")}</p>}
+            </div>
+          ))}
+          {sending && <div className="bubble assistant">Thinking from this session’s memories…</div>}
+          <div ref={bottomRef} />
         </div>
         <div className="row chips">
-          <button onClick={() => setQuestion("What caused the checkout latency regression?")}>What caused it?</button>
-          <button onClick={() => setQuestion("Should we raise the pool to 200?")}>Raise pool to 200?</button>
-          <button onClick={() => setQuestion("What is our office Wi-Fi password?")}>No-evidence question</button>
+          <button onClick={() => send("What caused the checkout latency regression?")}>What caused it?</button>
+          <button onClick={() => send("Should we raise the pool to 200?")}>Raise pool to 200?</button>
+          <button onClick={() => send("How has our checkout guidance changed over time?")}>How has guidance changed?</button>
+          <button onClick={() => send("kubectl delete pods in prod checkout — is that OK?")}>Check a dangerous action</button>
+          <button onClick={() => send("What is our office Wi-Fi password?")}>No-evidence question</button>
         </div>
-        {ask && <div className={ask.dontKnow ? "answer idk" : "answer"}>
-          <p>{ask.answer}</p>
-          {ask.citations.length > 0 && <p className="meta">Sources: {ask.citations.map((c) => `[${c.n}] ${c.title}${c.stale ? " (stale)" : ""}`).join(" · ")}</p>}
-        </div>}
+        <div className="row composer">
+          <input className="grow" placeholder="Ask this session… (Enter to send)" value={input}
+            onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
+          <button className="primary" onClick={() => send()} disabled={sending}>Send</button>
+        </div>
       </section>
 
       <section className="panel">
-        <h2>5 · Memories — latest verified wins, stale is demoted</h2>
+        <h2>3 · Memories — latest verified wins, stale is demoted</h2>
         <div className="row chips">
           {["all", "runbook", "guardrail", "attempt", "decision", "note"].map((f) =>
             <button key={f} className={filter === f ? "chip on" : "chip"} onClick={() => setFilter(f)}>{f}</button>)}
@@ -128,6 +167,7 @@ export default function App() {
               <p className="meta">confidence {m.confidence.toFixed(2)} · verified {ago(m.last_verified)} · {m.versions} past version(s) · via {m.source}
                 {m.stale && m.status === "active" ? " · STALE — check before obeying" : ""}{m.status !== "active" ? ` · ${m.status.toUpperCase()}` : ""}</p>
               <div className="row">
+                <button onClick={() => toggleAttach(m)}>{attachedIds.includes(m.id) ? "In this session ✓ — remove" : "Add to session"}</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "up" }) }); load(); }}>Useful</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "down" }) }); load(); }}>Wrong / stale</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/verify`, { method: "POST" }); load(); }}>Verify now</button>
@@ -139,7 +179,8 @@ export default function App() {
         {shown.length === 0 && <p>No memories of this type yet. Dump one above — no filing decision needed.</p>}
       </section>
 
-      <footer>Private by default. Share a compiled slice when you choose; recipients fork it into their own Tribe. MCP: <code>npm run mcp</code> exposes pull_context / push_context over this same store.</footer>
+      <footer>Private by default. This session travels with you: continue it here, or in an IDE via MCP (<code>list_sessions</code> · <code>create_session</code> · <code>pull_context</code> · <code>push_context</code> · <code>append_chat</code>). Run <code>npm run mcp</code> / <code>node scripts/mcp-probe.mjs</code> to see it.</footer>
     </div>
   );
 }
+

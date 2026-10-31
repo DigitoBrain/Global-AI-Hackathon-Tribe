@@ -22,11 +22,12 @@ Copy `.env.example` to `.env.local` and set `META_API_KEY`. Defaults: base URL `
 
 ## The 2-minute demo
 
-1. **Dump anything** — paste a log or note in the capture box (try adding `api_key=sk-...`): it is filed as a memory and the secret is redacted before storage.
-2. **Compiled brief** — the checkout-latency session brief (summary, timeline, open questions) regenerates from its memories; with a key, the summary is written by the Meta model.
-3. **Guardrail** — check `kubectl delete pods -n prod checkout`: Tribe blocks it with the Mar 3 incident memory and the safe alternative.
-4. **Grounded Ask** — “What caused the checkout latency regression?” returns a cited answer; “Should we raise the pool to 200?” surfaces the rejected, never-committed attempt; a no-evidence question returns an explicit “I don't know.”
-5. **MCP handoff** — `npm run mcp` serves `pull_context` / `push_context` over the same store. Verify with `node scripts/mcp-probe.mjs`: a second AI client pulls the compiled brief and pushes a finding that appears in the web app.
+The UI has three sections: **Capture**, **Context Session** (one chat), **Memories**.
+
+1. **Dump anything** — paste a log or note in the capture box (try adding a fake `api_key=`): it is filed as a memory, added to the current session, and the secret is redacted before storage.
+2. **Chat the session** — in Context Session, ask “What caused the checkout latency regression?” for a cited answer, then follow up (“And why did that amplify it?”) like any chat app. “Should we raise the pool to 200?” surfaces the rejected, never-committed attempt. “How has our checkout guidance changed over time?” walks the evolution. Typing the dangerous pod-delete action gets blocked by the guardrail memory, in-chat. A no-evidence question returns an explicit “I don't know.”
+3. **Memories** — every answer's sources live here with trust badges; attach/detach them to the session, verify, deprecate, or mark feedback.
+4. **Take the session to your IDE** — `npm run mcp` exposes `list_sessions` / `create_session` / `pull_context` / `push_context` / `append_chat` over the same store, so an IDE AI client can continue this exact session (brief + recent chat) or start a new one. Verify with `node scripts/mcp-probe.mjs`.
 
 Use **Reset demo** to restore the seed data at any time.
 

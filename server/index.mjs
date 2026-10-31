@@ -3,7 +3,9 @@ import path from "node:path";
 import fs from "node:fs";
 import {
   listMemories, getMemory, createMemory, updateMemory, addFeedback, verifyMemory,
-  listSessions, getSession, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
+  listSessions, getSession, createSession, updateSession, attachMemory, detachMemory,
+  addOpenQuestion, evolutionChain, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
+  listMessages, sessionChat,
 } from "./store.mjs";
 import { seedIfEmpty, resetSeed } from "./seed.mjs";
 import { llmStatus, llmConfig } from "./llm.mjs";
@@ -21,7 +23,9 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/memories", (_req, res) => res.json(listMemories().map(withMeta)));
 app.post("/api/memories", (req, res) => {
   if (!req.body?.body) return res.status(400).json({ error: "body is required" });
-  res.status(201).json(createMemory(req.body));
+  const out = createMemory(req.body);
+  if (req.body.sessionId) attachMemory(Number(req.body.sessionId), out.memory.id);
+  res.status(201).json(out);
 });
 app.patch("/api/memories/:id", (req, res) => {
   const m = updateMemory(Number(req.params.id), req.body || {});
@@ -36,6 +40,40 @@ app.post("/api/memories/:id/verify", (req, res) => {
   return m ? res.json(withMeta(m)) : res.status(404).json({ error: "not found" });
 });
 app.get("/api/sessions", (_req, res) => res.json(listSessions()));
+app.post("/api/sessions", (req, res) => {
+  if (!req.body?.title?.trim()) return res.status(400).json({ error: "title is required" });
+  res.status(201).json(createSession(req.body.title.trim()));
+});
+app.patch("/api/sessions/:id", (req, res) => {
+  const s = updateSession(Number(req.params.id), req.body || {});
+  return s ? res.json(s) : res.status(404).json({ error: "not found" });
+});
+app.post("/api/sessions/:id/memories", (req, res) => {
+  const s = attachMemory(Number(req.params.id), Number(req.body?.memoryId));
+  return s ? res.json({ ...s, memories: s.memories.map(withMeta) }) : res.status(404).json({ error: "session or memory not found" });
+});
+app.delete("/api/sessions/:id/memories/:memoryId", (req, res) => {
+  const s = detachMemory(Number(req.params.id), Number(req.params.memoryId));
+  return s ? res.json({ ...s, memories: s.memories.map(withMeta) }) : res.status(404).json({ error: "not found" });
+});
+app.post("/api/sessions/:id/questions", (req, res) => {
+  const s = addOpenQuestion(Number(req.params.id), req.body?.question || "");
+  return s ? res.json(s) : res.status(400).json({ error: "question is required" });
+});
+app.get("/api/sessions/:id/messages", (req, res) => {
+  return getSession(Number(req.params.id))
+    ? res.json(listMessages(Number(req.params.id)))
+    : res.status(404).json({ error: "not found" });
+});
+app.post("/api/sessions/:id/chat", async (req, res) => {
+  if (!req.body?.message?.trim()) return res.status(400).json({ error: "message is required" });
+  const out = await sessionChat(Number(req.params.id), req.body.message.trim());
+  return out ? res.json(out) : res.status(404).json({ error: "session not found" });
+});
+app.get("/api/evolution", (req, res) => {
+  const chain = evolutionChain(listMemories().map(withMeta), req.query.tag || req.query.q || "");
+  res.json({ topic: req.query.tag || req.query.q || "", chain });
+});
 app.get("/api/sessions/:id", (req, res) => {
   const s = getSession(Number(req.params.id));
   return s ? res.json({ ...s, memories: s.memories.map(withMeta) }) : res.status(404).json({ error: "not found" });
