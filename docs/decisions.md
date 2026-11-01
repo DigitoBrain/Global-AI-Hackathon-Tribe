@@ -168,6 +168,13 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: Heterogeneous knowledge does not fit a taxonomy the user must learn: one memory is routinely a warning, a procedure, and a failed-attempt record at once, and a wrong label would make behaviour depend on filing. Large-scale search over uncontrolled content needs heavy classification; Tribe can instead define a small, controlled primitive and let retrieval do the understanding. Choosing a kind was also unworkable consistently across browser capture, in-chat promotion, and external agents over MCP.
 - Consequences: Existing memories are migrated to the single primitive on startup; seed data is stored the same way. Lifecycle status (`active/superseded/deprecated`) and provenance remain — they describe validity and origin, not meaning. An ephemeral classifier (added and removed during this change) must not be reintroduced as a stored field or user choice; content cues may only be evaluated at query/action time.
 
+## D-023 — Session membership is formed by working, not managed per memory
+
+- Status: Decided (user-directed simplification, 2026-11-01); implemented same day
+- Decision: Memory cards have no "In this session / Add to session" control. A memory belongs to a Context Session because it was captured, promoted from that session's chat, or pushed to it by a client while working there — membership is a record of where the work happened, not a filing decision to revisit per memory. Removing the control also removed the attach/detach state from the web UI; the underlying session-memory relation remains internal. Separately, chat auto-scroll is confined to the chat panel itself (the page must never jump to Memories when a message arrives).
+- Why: A per-memory membership toggle asks the user to administer plumbing whose correct answer Tribe already knows from context, and its purpose ("why is this button here?") was not discoverable. If knowledge should stop grounding answers, the meaningful actions are correcting, verifying, deprecating, or superseding the memory itself.
+- Consequences: To work with older knowledge in a session, capture or promote it in that session's context (or push it there via a client); there is no membership checklist to maintain.
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace

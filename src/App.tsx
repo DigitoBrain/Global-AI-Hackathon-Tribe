@@ -23,7 +23,6 @@ export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
-  const [attachedIds, setAttachedIds] = useState<number[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [health, setHealth] = useState<{ llm?: { mode: string } } | null>(null);
   const [notice, setNotice] = useState("");
@@ -34,7 +33,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [supersedePrompt, setSupersedePrompt] = useState<{ fromId: number; fromTitle: string; toId: number; toTitle: string } | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const chatRef = useRef<HTMLDivElement>(null);
 
   const load = async (keepSid?: number | null) => {
     const [mems, sess, h] = await Promise.all([api("/api/memories"), api("/api/sessions"), api("/api/health")]);
@@ -43,13 +42,16 @@ export default function App() {
     const sid = wanted && sess.some((s: Session) => s.id === wanted) ? wanted : (sess[0]?.id ?? null);
     setSessionId(sid);
     if (sid) {
-      const [b, detail, msgs] = await Promise.all([
-        api(`/api/sessions/${sid}/brief`), api(`/api/sessions/${sid}`), api(`/api/sessions/${sid}/messages`)]);
-      setBrief(b); setAttachedIds((detail.memories || []).map((m: Memory) => m.id)); setMessages(msgs);
-    } else { setBrief(null); setAttachedIds([]); setMessages([]); }
+      const [b, msgs] = await Promise.all([
+        api(`/api/sessions/${sid}/brief`), api(`/api/sessions/${sid}/messages`)]);
+      setBrief(b); setMessages(msgs);
+    } else { setBrief(null); setMessages([]); }
   };
   useEffect(() => { load().catch((e) => setNotice(String(e))); }, []);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, sending]);
+  useEffect(() => {
+    const el = chatRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, sending]);
 
   const capture = async () => {
     if (!dump.trim()) return;
@@ -72,12 +74,6 @@ export default function App() {
       await api(`/api/sessions/${sessionId}/chat`, { method: "POST", body: JSON.stringify({ message }) });
       await load();
     } catch (e) { setNotice(String(e)); } finally { setSending(false); }
-  };
-  const toggleAttach = async (m: Memory) => {
-    if (!sessionId) return;
-    if (attachedIds.includes(m.id)) await api(`/api/sessions/${sessionId}/memories/${m.id}`, { method: "DELETE" });
-    else await api(`/api/sessions/${sessionId}/memories`, { method: "POST", body: JSON.stringify({ memoryId: m.id }) });
-    load();
   };
   const reset = async () => { await api("/api/reset", { method: "POST" }); load(null); };
   const shown = memories;
@@ -127,8 +123,8 @@ export default function App() {
           <button onClick={async () => { if (newQuestion.trim() && sessionId) { await api(`/api/sessions/${sessionId}/questions`, { method: "POST", body: JSON.stringify({ question: newQuestion.trim() }) }); setNewQuestion(""); load(); } }}>Add question</button>
         </div>
 
-        <div className="chat">
-          {messages.length === 0 && <div className="bubble assistant">This is your context session — ask anything. Answers are grounded in the memories attached to this session, cite their sources, and say “I don’t know” when there is no evidence. Try a suggestion below.</div>}
+        <div className="chat" ref={chatRef}>
+          {messages.length === 0 && <div className="bubble assistant">This is your context session — ask anything. Answers are grounded in this session's memories, cite their sources, and say “I don’t know” when there is no evidence. Try a suggestion below.</div>}
           {messages.map((m, idx) => (
             <div key={m.id} className={`bubble ${m.role}`}>
               <p>{m.content}</p>
@@ -150,7 +146,6 @@ export default function App() {
             </div>
           ))}
           {sending && <div className="bubble assistant">Thinking from this session’s memories…</div>}
-          <div ref={bottomRef} />
         </div>
         <div className="row chips">
           <button onClick={() => send("What caused the checkout latency regression?")}>What caused it?</button>
@@ -180,7 +175,6 @@ export default function App() {
               {m.index_keys && m.index_keys.length > 0 && <p className="meta">Findable via: {m.index_keys.slice(0, 6).join(" · ")}{m.index_keys.length > 6 ? ` · +${m.index_keys.length - 6} more` : ""}</p>}
               {m.connections && m.connections.length > 0 && <p className="meta">Connections: {m.connections.map((c, i) => <span key={i}>{c.direction === "to" ? `${c.kind} → ${c.title}` : `${c.title} —${c.kind}→ this`}{i < (m.connections?.length || 0) - 1 ? " · " : ""}</span>)}</p>}
               <div className="row">
-                <button onClick={() => toggleAttach(m)}>{attachedIds.includes(m.id) ? "In this session ✓ — remove" : "Add to session"}</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "up" }) }); load(); }}>Useful</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "down" }) }); load(); }}>Wrong / stale</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/verify`, { method: "POST" }); load(); }}>Verify now</button>
