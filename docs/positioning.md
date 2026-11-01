@@ -67,7 +67,7 @@ Suspicions, ugly-but-working workarounds, real reasons behind decisions. Not for
 PR with 40 min of investigation detail becomes unreadable, so detail is deleted/lost. Tribe: PR stays 5 clean lines; investigation lives in a session; reviewers pull depth themselves.
 
 ### S-6 Slack ask → compile → share → fork
-Asker asks in Slack. Owner finds memories, optionally summarises into snippet/runbook/steps, shares slice to asker or team. Asker forks into own Tribe, adapts. Knowledge spreads like code: owned copies, not central wiki mush.
+Asker asks in Slack. Owner finds memories, optionally summarises into snippet/runbook/steps (with the compiler, any AI, or manually), copy-pastes the content to asker or team. Asker keeps it by creating their own Memory from the content in their Tribe, then adapts it. Knowledge spreads like code: owned copies, not central wiki mush. (Per D-020 there is deliberately no slice format or fork feature — sharing is plain content, re-capture is the fork.)
 
 ### S-7 New joiner
 Existing user shares session; joiner forks/uses immediately with context (history, why, what failed) instead of re-deriving it.

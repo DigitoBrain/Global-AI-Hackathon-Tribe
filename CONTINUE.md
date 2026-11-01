@@ -66,6 +66,9 @@ See [docs/decisions.md](docs/decisions.md) for rationale. Summary:
 17. **D-017 Multi-index + self-evolving keys (implemented 2026-10-31):** fused signals (keyword, learned keys, chronology, trust, graph, session) with plain-language `why` on every citation; failed questions can trigger validated index-key evolution (**Improve findability**) — bodies never auto-rewritten. Proactive question simulation is roadmap.
 18. **D-018 Temporal validity (implemented 2026-10-31):** superseded/deprecated are hard-excluded from current answers (history only), `valid_to` recorded on supersession, and capture/promote suggests "this replaces X?" for one-click human-confirmed supersession.
 19. **D-019 Sources are Memories (implemented 2026-10-31):** who/what-can-provide knowledge is stored as `type=source` memories (no separate registry — reverted at user direction), retrievable in chat and via MCP `find_source`/`add_source`.
+20. **D-020 Sharing is content (implemented 2026-10-31):** no slice format/fork feature (built, then removed at user direction). Owner copies raw or processed memories in any form, through any channel; recipient re-captures as their own Memory via Capture.
+21. **D-021 Ambient personal sessions (implemented 2026-10-31):** no Archive and no Share controls on Context Sessions. A session is the owner's own context, available on every surface (browser/CLI/MCP/IDE) via the same store — never something to file or hand off.
+22. **D-022 One Memory primitive (implemented 2026-11-01):** no semantic Kind anywhere (Capture, promotion, MCP, cards, filters). Memories self-file into the current session and auto-link to related memories; warnings/tried/provider meaning is read from content at use time. The Memory primitive is deliberately minimal — content, provenance, trust, validity, keys, links, versions.
 
 ## The plan (canonical copy)
 

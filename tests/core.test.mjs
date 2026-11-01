@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scrubSecrets } from "../server/scrub.mjs";
-import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory } from "../server/store.mjs";
+import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory, relatedCandidates } from "../server/store.mjs";
 
 test("scrub redacts api keys and bearer tokens", () => {
   const r = scrubSecrets("api_key=sk-test1234567890 and Bearer abcdefghijklmnop");
@@ -87,6 +87,15 @@ test("source memories (who/what can provide) match by stored knowledge, not by n
   const src = { title: "Payments on-call can provide payment webhook knowledge", body: "Payments on-call can provide current retry limits and the vendor escalation path. Ask via Slack.", tags: ["payments", "source"] };
   assert.ok(scoreSourceMemory("whom should I ask about vendor escalation for payments", src) >= 2);
   assert.equal(scoreSourceMemory("what is our office wifi password", src), 0);
+});
+
+test("connections are found from memory content without a user-chosen kind", () => {
+  const fresh = { id: 9, title: "Checkout latency clue", body: "Checkout latency rises when the database pool is saturated and payment retries increase." };
+  const pool = [
+    { id: 5, title: "Pool exhaustion", body: "Checkout latency was caused by database pool saturation and payment retries.", tags: ["checkout"], confidence: 0.9, status: "active", updated_at: new Date().toISOString(), last_verified: new Date().toISOString() },
+    { id: 6, title: "Lunch", body: "Sandwich order for Friday.", tags: [], confidence: 0.9, status: "active", updated_at: new Date().toISOString(), last_verified: new Date().toISOString() },
+  ];
+  assert.deepEqual(relatedCandidates(fresh, pool).map((m) => m.id), [5]);
 });
 
 test("promoted memory title comes from the message, truncated safely", () => {

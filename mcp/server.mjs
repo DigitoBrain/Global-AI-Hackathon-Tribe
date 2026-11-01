@@ -4,7 +4,7 @@ import { z } from "zod";
 import {
   getSession, listSessions, createSession, createMemory, attachMemory,
   compileBrief, listMessages, addMessage, enrichMemoryKeys, backfillKeys,
-  findSourceMemories, listMemories,
+  findSourceMemories, listMemories, isProviderMemory,
 } from "../server/store.mjs";
 import { seedIfEmpty } from "../server/seed.mjs";
 
@@ -38,34 +38,21 @@ server.tool("pull_context",
   });
 
 server.tool("push_context",
-  "Push a finding into Tribe as a memory. Pass session_id to attach it to that context session so it grounds future answers there.",
-  { title: z.string(), body: z.string(), type: z.string().optional(), session_id: z.number().optional() },
-  async ({ title, body, type, session_id }) => {
-    const { memory, redactions } = createMemory({ title, body, type: type || "note", source: "mcp" });
+  "Push a finding into Tribe as a memory. No kind or category is needed: Tribe indexes the content and connects it to related memories automatically. Pass session_id to attach it to that context session so it grounds future answers there.",
+  { title: z.string(), body: z.string(), session_id: z.number().optional() },
+  async ({ title, body, session_id }) => {
+    const { memory, redactions } = createMemory({ title, body, source: "mcp" });
     if (session_id) attachMemory(session_id, memory.id);
     await enrichMemoryKeys(memory.id);
     return text(`Stored memory #${memory.id}: ${memory.title}${session_id ? ` (attached to session ${session_id})` : ""} (secret redactions: ${redactions})`);
   });
 
 server.tool("find_source",
-  "Find who or what can provide data or a capability, from Tribe memories of type 'source' (tribal knowledge about people, systems, tools and services). Use when stored answers don't cover a question and you need the right source to ask. With no query, lists all source memories.",
+  "Find who or what can provide data or a capability, from ordinary Tribe memories whose content records that knowledge. Use when stored answers don't cover a question and you need the right person, system, tool, or service to ask. With no query, lists memories that record a provider.",
   { query: z.string().optional() },
   async ({ query }) => text(JSON.stringify(
-    (query ? findSourceMemories(query) : listMemories().filter((m) => m.type === "source")),
+    (query ? findSourceMemories(query) : listMemories().filter((m) => m.status === "active" && isProviderMemory(m))),
     null, 2)));
-
-server.tool("add_source",
-  "Record, as a Tribe memory of type 'source', who or what can provide which data or capability, how to ask, and under what conditions.",
-  { name: z.string(), capability: z.string(), access: z.string(), conditions: z.string().optional(), topics: z.string().optional() },
-  async ({ name, capability, access, conditions, topics }) => {
-    const { memory } = createMemory({
-      title: `${name} can provide ${capability}`.slice(0, 90),
-      body: `${name} can provide ${capability}. Ask via: ${access}${conditions ? `. Conditions: ${conditions}` : ""}`,
-      type: "source", tags: ["source", ...String(topics || "").split(/[, ]+/).filter(Boolean)], source: "mcp",
-    });
-    await enrichMemoryKeys(memory.id);
-    return text(`Stored source memory #${memory.id}: ${memory.title}`);
-  });
 
 server.tool("append_chat",
   "Append a message to a context session's chat history (e.g. record what was decided in the IDE), so the same conversation continues in the web app.",

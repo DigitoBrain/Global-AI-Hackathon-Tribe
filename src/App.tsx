@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 type Memory = {
-  id: number; title: string; body: string; type: string; tags: string[];
+  id: number; title: string; body: string; tags: string[];
   confidence: number; source: string; status: string; stale: boolean; versions: number;
   last_verified: string; created_at?: string; connections?: Connection[]; index_keys?: string[]; valid_to?: string | null;
 };
@@ -29,19 +29,12 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [dump, setDump] = useState("");
   const [dumpTitle, setDumpTitle] = useState("");
-  const [intoSession, setIntoSession] = useState(true);
   const [newTitle, setNewTitle] = useState("");
   const [newQuestion, setNewQuestion] = useState("");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [filter, setFilter] = useState("all");
-  const [share, setShare] = useState("");
-  const [linkPick, setLinkPick] = useState<Record<number, { toId: number; kind: string }>>({});
   const [supersedePrompt, setSupersedePrompt] = useState<{ fromId: number; fromTitle: string; toId: number; toTitle: string } | null>(null);
-  const [dumpType, setDumpType] = useState("note");
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  const current = sessions.find((s) => s.id === sessionId);
 
   const load = async (keepSid?: number | null) => {
     const [mems, sess, h] = await Promise.all([api("/api/memories"), api("/api/sessions"), api("/api/health")]);
@@ -60,8 +53,9 @@ export default function App() {
 
   const capture = async () => {
     if (!dump.trim()) return;
-    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, type: dumpType, source: "dump-box", sessionId: intoSession ? sessionId : null }) });
-    setNotice(r.redactions ? `Captured and filed${intoSession && sessionId ? " into this session" : ""}. ${r.redactions} secret(s) redacted before storage.` : `Captured and filed${intoSession && sessionId ? " into this session" : ""} — no folder decision needed.`);
+    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, source: "dump-box", sessionId }) });
+    const connected = (r.memory.connections || []).map((c: Connection) => c.title).filter(Boolean);
+    setNotice(`Captured.${sessionId ? " Added to your current session." : ""}${connected.length ? ` Connected to: ${connected.join(" · ")}.` : ""}${r.redactions ? ` ${r.redactions} secret(s) redacted before storage.` : ""}`);
     if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title });
     setDump(""); setDumpTitle(""); load();
   };
@@ -85,10 +79,8 @@ export default function App() {
     else await api(`/api/sessions/${sessionId}/memories`, { method: "POST", body: JSON.stringify({ memoryId: m.id }) });
     load();
   };
-  const makeShare = () => brief && current && setShare(
-    `Tribe session — ${current.title}\n${brief.summary}\nOpen: ${brief.open_questions.join(" ") || "—"}\n(Continue this session in any Tribe client, or via MCP: pull_context session ${sessionId})`);
-  const reset = async () => { await api("/api/reset", { method: "POST" }); setShare(""); load(null); };
-  const shown = memories.filter((m) => filter === "all" || m.type === filter);
+  const reset = async () => { await api("/api/reset", { method: "POST" }); load(null); };
+  const shown = memories;
 
   return (
     <div className="page">
@@ -111,16 +103,7 @@ export default function App() {
       <section className="panel">
         <h2>1 · Dump anything. Tribe files it.</h2>
         <input placeholder="Title (optional — Tribe will file it anyway)" value={dumpTitle} onChange={(e) => setDumpTitle(e.target.value)} />
-        <textarea rows={3} placeholder="Paste a log, snippet, decision, failure… try including a fake api_key to see scrubbing" value={dump} onChange={(e) => setDump(e.target.value)} />
-        <div className="row">
-          <label className="meta">Kind:</label>
-          <select value={dumpType} onChange={(e) => setDumpType(e.target.value)}>
-            <option value="note">note</option><option value="runbook">runbook</option><option value="guardrail">guardrail</option>
-            <option value="attempt">attempt</option><option value="decision">decision</option>
-            <option value="source">source — who/what can provide something</option>
-          </select>
-          <label className="check"><input type="checkbox" checked={intoSession} onChange={(e) => setIntoSession(e.target.checked)} /> Add to current session</label>
-        </div>
+        <textarea rows={3} placeholder="Paste anything — a log, a warning, what you tried, who can help, a decision… Tribe will file and connect it." value={dump} onChange={(e) => setDump(e.target.value)} />
         <button className="primary" onClick={capture}>Capture memory</button>
       </section>
 
@@ -131,17 +114,13 @@ export default function App() {
         </div>
         <div className="row">
           <select value={sessionId ?? ""} onChange={(e) => load(Number(e.target.value))}>
-            {sessions.map((s) => <option key={s.id} value={s.id}>{s.title} ({s.status})</option>)}
+            {sessions.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
-          <button onClick={async () => { if (current) { await api(`/api/sessions/${current.id}`, { method: "PATCH", body: JSON.stringify({ status: current.status === "active" ? "archived" : "active" }) }); load(); } }}>
-            {current?.status === "active" ? "Archive" : "Resume"}</button>
-          <button onClick={makeShare}>Share / continue elsewhere</button>
         </div>
         <div className="row">
           <input className="grow" placeholder="New session — e.g. Payments timeout investigation" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
           <button onClick={createSession}>Create session</button>
         </div>
-        {share && <pre className="share">{share}</pre>}
         {brief && <p className="briefline"><strong>Brief:</strong> {brief.summary} <span className="meta">({brief.memory_count} memories{brief.open_questions.length ? ` · open: ${brief.open_questions.join(" ")}` : ""})</span></p>}
         <div className="row">
           <input className="grow" placeholder="Add an open question for this session" value={newQuestion} onChange={(e) => setNewQuestion(e.target.value)} />
@@ -190,31 +169,16 @@ export default function App() {
 
       <section className="panel">
         <h2>3 · Memories — latest verified wins, stale is demoted</h2>
-        <p className="meta">Including <strong>source</strong> memories: tribal knowledge about who or what can provide which data or capability. When no stored answer covers a question, Tribe points to one of these instead of guessing.</p>
-        <div className="row chips">
-          {["all", "runbook", "guardrail", "attempt", "decision", "note", "source"].map((f) =>
-            <button key={f} className={filter === f ? "chip on" : "chip"} onClick={() => setFilter(f)}>{f}</button>)}
-        </div>
+        <p className="meta">One kind of thing: a Memory. Some record who or what can provide something; some warn, explain, or preserve what was tried. Tribe understands that from the content when you use it — you never label it.</p>
         <div className="cards">
           {shown.map((m) => (
-            <article key={m.id} className={`card ${m.type === "guardrail" ? "guard" : ""} ${m.status !== "active" ? "dim" : ""}`}>
-              <div className="row between"><strong>{m.title}</strong><span className="badge">{m.type}</span></div>
+            <article key={m.id} className={`card ${m.status !== "active" ? "dim" : ""}`}>
+              <div className="row between"><strong>{m.title}</strong></div>
               <p>{m.body}</p>
               <p className="meta">confidence {m.confidence.toFixed(2)} · verified {ago(m.last_verified)} · {m.versions} past version(s) · via {m.source}
                 {m.stale && m.status === "active" ? " · STALE — check before obeying" : ""}{m.status !== "active" ? ` · ${m.status.toUpperCase()}` : ""}{m.valid_to ? ` · was true until ${m.valid_to.slice(0, 10)}` : ""}</p>
               {m.index_keys && m.index_keys.length > 0 && <p className="meta">Findable via: {m.index_keys.slice(0, 6).join(" · ")}{m.index_keys.length > 6 ? ` · +${m.index_keys.length - 6} more` : ""}</p>}
               {m.connections && m.connections.length > 0 && <p className="meta">Connections: {m.connections.map((c, i) => <span key={i}>{c.direction === "to" ? `${c.kind} → ${c.title}` : `${c.title} —${c.kind}→ this`}{i < (m.connections?.length || 0) - 1 ? " · " : ""}</span>)}</p>}
-              <div className="row">
-                <select value={linkPick[m.id]?.toId || ""} onChange={(e) => setLinkPick({ ...linkPick, [m.id]: { toId: Number(e.target.value), kind: linkPick[m.id]?.kind || "related" } })}>
-                  <option value="">Connect to…</option>
-                  {memories.filter((x) => x.id !== m.id).map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
-                </select>
-                <select value={linkPick[m.id]?.kind || "related"} onChange={(e) => setLinkPick({ ...linkPick, [m.id]: { toId: linkPick[m.id]?.toId || 0, kind: e.target.value } })}>
-                  <option value="related">related</option><option value="supports">supports</option>
-                  <option value="contradicts">contradicts</option><option value="supersedes">supersedes</option>
-                </select>
-                <button onClick={async () => { const p = linkPick[m.id]; if (p?.toId) { await api(`/api/memories/${m.id}/links`, { method: "POST", body: JSON.stringify({ toId: p.toId, kind: p.kind }) }); load(); } }}>Link</button>
-              </div>
               <div className="row">
                 <button onClick={() => toggleAttach(m)}>{attachedIds.includes(m.id) ? "In this session ✓ — remove" : "Add to session"}</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "up" }) }); load(); }}>Useful</button>
@@ -225,10 +189,10 @@ export default function App() {
             </article>
           ))}
         </div>
-        {shown.length === 0 && <p>No memories of this type yet. Dump one above — no filing decision needed.</p>}
+        {shown.length === 0 && <p>No memories yet. Dump one above — Tribe will file and connect it.</p>}
       </section>
 
-      <footer>Private by default. This session travels with you: continue it here, or in an IDE via MCP (<code>list_sessions</code> · <code>create_session</code> · <code>pull_context</code> · <code>push_context</code> · <code>append_chat</code>). Run <code>npm run mcp</code> / <code>node scripts/mcp-probe.mjs</code> to see it.</footer>
+      <footer>Private by default. This session travels with you: continue it here, or in an IDE via MCP (<code>list_sessions</code> · <code>create_session</code> · <code>pull_context</code> · <code>push_context</code> · <code>find_source</code> · <code>append_chat</code>). Run <code>npm run mcp</code> / <code>node scripts/mcp-probe.mjs</code> to see it.</footer>
     </div>
   );
 }

@@ -24,7 +24,7 @@ export function seedIfEmpty() {
     ["Checkout observability dashboard can provide live metrics", "The checkout observability dashboard (a system) can provide live checkout p95 latency, DB pool saturation and webhook retry rate right now. Access: internal dashboard, checkout / production overview. Conditions: read-only; VPN required.", "source", ["checkout", "metrics", "source"], 0.85, "team-knowledge", "active", null, "", "", 3, 3],
   ];
   const ids = rows.map((r) => Number(mem.run(
-    r[0], r[1], r[2], JSON.stringify(r[3]), r[4], r[5], r[6], r[7], r[8], r[9],
+    r[0], r[1], "memory", JSON.stringify(r[3]), r[4], r[5], r[6], r[7], r[8], r[9],
     daysAgo(r[10]), daysAgo(Math.min(r[10], r[11])), daysAgo(r[11])).lastInsertRowid));
   // Row 2 supersedes is row 1 in spirit; store old->new link by updating superseded row is already status, keep ids sequential.
   const s = db.prepare("INSERT INTO sessions (title,status,open_questions,created_at,updated_at) VALUES (?,?,?,?,?)")

@@ -7,7 +7,7 @@ import {
   addOpenQuestion, evolutionChain, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
   listMessages, sessionChat, repoRoot, promoteMessage, createLink,
   enrichMemoryKeys, evolveIndex, backfillKeys, findSupersessionCandidate,
-  findSourceMemories,
+  findSourceMemories, isProviderMemory,
 } from "./store.mjs";
 import { seedIfEmpty, resetSeed } from "./seed.mjs";
 import { llmStatus, llmConfig } from "./llm.mjs";
@@ -106,7 +106,7 @@ app.post("/api/memories/:id/links", (req, res) => {
   return links ? res.status(201).json({ links }) : res.status(400).json({ error: "valid from/to memories required" });
 });
 app.get("/api/sources", (req, res) => {
-  const all = listMemories().filter((m) => m.type === "source");
+  const all = listMemories().filter((m) => m.status === "active" && isProviderMemory(m));
   res.json(req.query.q ? findSourceMemories(req.query.q) : all.map(withMeta));
 });
 app.post("/api/ask", async (req, res) => {

@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS links (
 try { db.exec("ALTER TABLE messages ADD COLUMN promoted_memory_id INTEGER"); } catch { /* already present */ }
 try { db.exec("ALTER TABLE memories ADD COLUMN index_keys TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
 try { db.exec("ALTER TABLE memories ADD COLUMN valid_to TEXT"); } catch { /* already present */ }
+db.exec("UPDATE memories SET type='memory' WHERE type != 'memory'");
 db.exec(`CREATE TABLE IF NOT EXISTS index_evolutions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, memory_id INTEGER NOT NULL, question TEXT NOT NULL,
   added_keys TEXT NOT NULL DEFAULT '[]', validated INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
@@ -159,6 +160,23 @@ export async function sessionChat(sessionId, userText) {
 }
 
 const KEY_STOP = new Set("the a an is are was were what why how do does did to of in on for and or it this that with when then than from into".split(" "));
+
+export function relatedCandidates(memory, pool, opts = {}) {
+  return searchMemories(`${memory.title} ${memory.body}`, pool, opts)
+    .filter((hit) => hit.hits >= 2)
+    .slice(0, 2)
+    .map((hit) => hit.memory);
+}
+
+export function autoLinkMemory(id) {
+  const memory = getMemory(id);
+  if (!memory) return [];
+  const pool = listMemories().filter((m) => m.id !== id && m.status === "active");
+  for (const candidate of relatedCandidates(memory, pool, { graph: graphAuthority() })) {
+    createLink(id, candidate.id, "related");
+  }
+  return listLinksFor(id);
+}
 export function deterministicKeys(title, body, tags = []) {
   const words = `${title} ${body}`.toLowerCase().split(/[^a-z0-9]+/)
     .filter((w) => w.length > 3 && !KEY_STOP.has(w));
@@ -196,13 +214,13 @@ export function createMemory(input) {
   const r = db.prepare(
     `INSERT INTO memories (title,body,type,tags,confidence,source,status,supersedes_id,scope,severity,created_at,updated_at,last_verified,index_keys)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    input.title || "Untitled memory", scrubbed.text, input.type || "note",
-    JSON.stringify(input.tags || []), input.confidence ?? 0.8, input.source || "manual",
-    input.status || "active", input.supersedes_id || null, input.scope || "",
-    input.severity || "", t, t, t,
+    input.title || "Untitled memory", scrubbed.text, "memory",
+    "[]", input.confidence ?? 0.8, input.source || "manual",
+    input.status || "active", input.supersedes_id || null, "", "", t, t, t,
     JSON.stringify(input.index_keys?.length ? input.index_keys : deterministicKeys(input.title || "", scrubbed.text, input.tags || [])));
-  const mem = getMemory(Number(r.lastInsertRowid));
-  return { memory: mem, redactions: scrubbed.redactions };
+  const id = Number(r.lastInsertRowid);
+  autoLinkMemory(id);
+  return { memory: getMemory(id), redactions: scrubbed.redactions };
 }
 
 export function updateMemory(id, input) {
@@ -212,8 +230,8 @@ export function updateMemory(id, input) {
     .run(id, old.title, old.body, now());
   const scrubbed = scrubSecrets(input.body ?? old.body);
   const nextStatus = input.status ?? old.status;
-  db.prepare("UPDATE memories SET title=?,body=?,type=?,status=?,confidence=?,valid_to=?,updated_at=? WHERE id=?")
-    .run(input.title ?? old.title, scrubbed.text, input.type ?? old.type,
+  db.prepare("UPDATE memories SET title=?,body=?,type='memory',status=?,confidence=?,valid_to=?,updated_at=? WHERE id=?")
+    .run(input.title ?? old.title, scrubbed.text,
       nextStatus, input.confidence ?? old.confidence,
       nextStatus === "superseded" ? (old.valid_to || now()) : old.valid_to, now(), id);
   return getMemory(id);
@@ -277,8 +295,7 @@ export function promoteMessage(sessionId, messageId) {
   if (!msg) return null;
   if (msg.promoted_memory_id) return { memory: withMeta(getMemory(msg.promoted_memory_id)), already: true };
   const { memory } = createMemory({
-    title: deriveMemoryTitle(msg.content), body: msg.content,
-    type: "note", source: "context-session", tags: [],
+    title: deriveMemoryTitle(msg.content), body: msg.content, source: "context-session",
   });
   attachMemory(sessionId, memory.id);
   const citations = JSON.parse(msg.citations || "[]");
@@ -291,20 +308,31 @@ export function promoteMessage(sessionId, messageId) {
   return { memory: withMeta(getMemory(memory.id)), already: false };
 }
 
+const memoryHay = (m) => `${m.title} ${m.body}`.toLowerCase();
+export function isProhibitionMemory(m) {
+  return /\b(never|do not|don't|must not|avoid|blocked|dangerous)\b/.test(memoryHay(m));
+}
+export function isTriedMemory(m) {
+  return /\b(tried|attempt|rejected|never committed|testing failed|test failed|abandoned)\b/.test(memoryHay(m));
+}
+export function isProviderMemory(m) {
+  return /\b(can provide|ask via|contact|who can provide|provides access|dashboard can|on-call can)\b/.test(memoryHay(m));
+}
+
 export function compileBrief(session) {
   const mems = session.memories || [];
   const active = mems.filter((m) => m.status !== "deprecated");
-  const root = active.find((m) => m.type === "decision") || active[0];
-  const guardrails = active.filter((m) => m.type === "guardrail");
-  const attempts = active.filter((m) => m.type === "attempt");
+  const latest = [...active].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0];
+  const watchFor = active.filter(isProhibitionMemory);
+  const alreadyTried = active.filter(isTriedMemory);
   const entities = [...new Set(active.flatMap((m) => m.tags))].slice(0, 8);
-  const summary = root
-    ? `${session.title}: ${root.title}. ${active.length} memories (${guardrails.length} guardrails, ${attempts.length} rejected attempts). Latest verified knowledge wins; stale items are demoted.`
+  const summary = latest
+    ? `${session.title}: ${active.length} memories. Most recently updated: ${latest.title}. ${watchFor.length} warning(s), ${alreadyTried.length} tried-and-settled item(s). Current verified knowledge wins; retired knowledge stays in history.`
     : `${session.title}: no memories yet.`;
   return {
     session_id: session.id, title: session.title, summary,
-    timeline: active.map((m) => ({ at: m.created_at, title: m.title, type: m.type, status: m.status })),
-    open_questions: session.open_questions, entities, guardrails, attempts,
+    timeline: active.map((m) => ({ at: m.created_at, title: m.title, status: m.status })),
+    open_questions: session.open_questions, entities, watch_for: watchFor, already_tried: alreadyTried,
     memory_count: active.length, compiled_at: now(),
   };
 }
@@ -313,7 +341,7 @@ export async function compileBriefSmart(session) {
   const brief = compileBrief(session);
   const text = await llmChat(
     "You compile a short incident brief. Use only the memories given. Be concise.",
-    `Session: ${session.title}\nMemories:\n${(session.memories || []).map((m) => `- [${m.type}/${m.status}] ${m.title}: ${m.body.slice(0, 200)}`).join("\n")}\nWrite a 2-sentence executive summary.`);
+    `Session: ${session.title}\nMemories:\n${(session.memories || []).map((m) => `- [${m.status}] ${m.title}: ${m.body.slice(0, 200)}`).join("\n")}\nWrite a 2-sentence executive summary.`);
   if (text) brief.summary = text;
   brief.llm = text ? "meta" : "deterministic";
   return brief;
@@ -379,7 +407,6 @@ export function findSupersessionCandidate(memory, pool) {
   for (const c of pool) {
     if (c.id === memory.id || c.status !== "active") continue;
     const sharedTag = (c.tags || []).some((t) => (memory.tags || []).includes(t));
-    if (!sharedTag && c.type !== memory.type) continue;
     const theirs = new Set(tok(`${c.title} ${c.body}`).filter((w) => w.length > 3 && !KEY_STOP.has(w)));
     const overlap = [...mine].filter((w) => theirs.has(w)).length / Math.max(1, Math.min(mine.size, theirs.size));
     const theirNums = new Set([...`${c.title} ${c.body}`.matchAll(/\d+/g)].map((x) => x[0]));
@@ -423,7 +450,7 @@ export async function groundedAsk(query, sessionId) {
     if (chain.length < 2) chain = [...ranked.map((r) => r.memory)].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     const seen = new Set(); chain = chain.filter((m) => !seen.has(m.id) && seen.add(m.id)).slice(-6);
     const citations = chain.map((m, i) => ({ n: i + 1, memory_id: m.id, title: m.title, status: m.status, stale: m.stale, at: m.created_at }));
-    const evidence = chain.map((m, i) => `[${i + 1}] (${fmtDate(m.created_at)}, ${m.type}/${m.status}) ${m.title}: ${m.body}`).join("\n");
+    const evidence = chain.map((m, i) => `[${i + 1}] (${fmtDate(m.created_at)}, ${m.status}) ${m.title}: ${m.body}`).join("\n");
     const llmText = await llmChat(
       "Explain how this knowledge evolved over time, oldest to current, citing like [1]. End with the current position. Use only the evidence; if insufficient, say exactly: I don't know.",
       `Question: ${query}\nChronological evidence:\n${evidence}`);
@@ -432,7 +459,7 @@ export async function groundedAsk(query, sessionId) {
   }
   const top = ranked.slice(0, 3);
   const citations = top.map((r, i) => ({ n: i + 1, memory_id: r.memory.id, title: r.memory.title, status: r.memory.status, stale: r.memory.stale, at: r.memory.created_at, why: r.why, signals: r.signals }));
-  const evidence = top.map((r, i) => `[${i + 1}] ${r.memory.title} (${r.memory.type}, confidence ${r.memory.confidence.toFixed(2)}): ${r.memory.body}`).join("\n");
+  const evidence = top.map((r, i) => `[${i + 1}] ${r.memory.title} (confidence ${r.memory.confidence.toFixed(2)}): ${r.memory.body}`).join("\n");
   const llmText = await llmChat(
     "Answer only from the evidence. Cite like [1]. If evidence is insufficient, say exactly: I don't know.",
     `Question: ${query}\nEvidence:\n${evidence}`);
@@ -477,32 +504,35 @@ export async function evolveIndex(question, sessionId) {
   return { question, before_hits: before.length, results, evolved: results.some((r) => r.validated) };
 }
 
-// Knowledge affordances are not a separate registry: they are Memories of
-// type "source" â€” tribal knowledge about who or what can provide which data
-// or capability, how to ask, and under what conditions. They are captured,
-// linked, verified and retired exactly like any other memory.
+// Who/what-can-provide knowledge is not a separate registry or kind: it is
+// ordinary tribal knowledge whose content says who or what can provide a
+// data set or capability, how to ask, and under what conditions.
 export function scoreSourceMemory(query, m) {
   const terms = tok(query).filter((w) => w.length >= 3 && !STOP.has(w));
   const hay = new Set(tok(`${m.title} ${m.body} ${(m.tags || []).join(" ")}`));
   return terms.filter((t) => hay.has(t)).length;
 }
 export function findSourceMemories(query, limit = 2) {
-  return listMemories().filter((m) => m.type === "source" && m.status === "active")
+  return listMemories().filter((m) => m.status === "active" && isProviderMemory(m))
     .map((m) => ({ memory: m, hits: scoreSourceMemory(query, m) }))
     .filter((r) => r.hits > 0).sort((x, y) => y.hits - x.hits).slice(0, limit).map((r) => r.memory);
 }
 
 export function guardrailCheck(action) {
   const text = String(action).toLowerCase();
-  const hits = listMemories().filter((m) => m.type === "guardrail" && m.status === "active")
-    .filter((g) => {
-      const keys = `${g.title} ${g.body}`.toLowerCase();
-      return text.split(/\s+/).some((w) => w.length > 3 && keys.includes(w)) &&
-        /kubectl delete|delete pods|drop table|grant|prod/.test(text);
-    });
+  const actionTerms = new Set(tok(text).filter((w) => w.length > 3));
+  const hits = listMemories().filter((m) => m.status === "active" && isProhibitionMemory(m))
+    .map((g) => {
+      const keys = new Set(tok(`${g.title} ${g.body}`));
+      const overlap = [...actionTerms].filter((w) => keys.has(w)).length;
+      return { memory: g, overlap };
+    })
+    .filter((r) => r.overlap >= 2 && /kubectl delete|delete pods|drop table|grant|prod/.test(text))
+    .sort((a, b) => b.overlap - a.overlap)
+    .map((r) => r.memory);
   return hits.length
     ? { blocked: true, guardrails: hits, message: `Stop. ${hits[0].title}. ${hits[0].body.split(".")[0]}.` }
-    : { blocked: false, guardrails: [], message: "No guardrail matched this action." };
+    : { blocked: false, guardrails: [], message: "No warning memory matched this action." };
 }
 
 

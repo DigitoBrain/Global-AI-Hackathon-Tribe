@@ -16,7 +16,7 @@ const sid = JSON.parse(created.content[0].text).id;
 console.log("create_session id:", sid);
 const pushed = await client.callTool({
   name: "push_context",
-  arguments: { title: "MCP probe finding", body: "Second AI client resumed work in a session created from the IDE.", type: "note", session_id: sid },
+  arguments: { title: "MCP probe finding", body: "Second AI client resumed work in a session created from the IDE.", session_id: sid },
 });
 console.log("push_context:", pushed.content[0].text);
 const appended = await client.callTool({ name: "append_chat", arguments: { session_id: sid, content: "IDE client continued this session." } });
