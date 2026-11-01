@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 type Memory = {
   id: number; title: string; body: string; type: string; tags: string[];
   confidence: number; source: string; status: string; stale: boolean; versions: number;
-  last_verified: string; created_at?: string; connections?: Connection[]; index_keys?: string[];
+  last_verified: string; created_at?: string; connections?: Connection[]; index_keys?: string[]; valid_to?: string | null;
 };
 type Session = { id: number; title: string; status: string; open_questions: string[] };
 type Citation = { n: number; title: string; status: string; stale?: boolean; at?: string; why?: string[] };
@@ -37,6 +37,7 @@ export default function App() {
   const [filter, setFilter] = useState("all");
   const [share, setShare] = useState("");
   const [linkPick, setLinkPick] = useState<Record<number, { toId: number; kind: string }>>({});
+  const [supersedePrompt, setSupersedePrompt] = useState<{ fromId: number; fromTitle: string; toId: number; toTitle: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const current = sessions.find((s) => s.id === sessionId);
@@ -60,6 +61,7 @@ export default function App() {
     if (!dump.trim()) return;
     const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, type: "note", source: "dump-box", sessionId: intoSession ? sessionId : null }) });
     setNotice(r.redactions ? `Captured and filed${intoSession && sessionId ? " into this session" : ""}. ${r.redactions} secret(s) redacted before storage.` : `Captured and filed${intoSession && sessionId ? " into this session" : ""} — no folder decision needed.`);
+    if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title });
     setDump(""); setDumpTitle(""); load();
   };
   const createSession = async () => {
@@ -97,6 +99,13 @@ export default function App() {
         </div>
       </header>
       {notice && <div className="notice">{notice}</div>}
+      {supersedePrompt && <div className="notice warnbox">
+        This looks like it replaces <strong>{supersedePrompt.toTitle}</strong>. Mark that memory superseded (it stays in history, but can no longer be served as the current answer)?
+        <div className="row">
+          <button className="primary" onClick={async () => { await api(`/api/memories/${supersedePrompt.fromId}/links`, { method: "POST", body: JSON.stringify({ toId: supersedePrompt.toId, kind: "supersedes" }) }); setSupersedePrompt(null); setNotice("Superseded. The old memory is history now — current answers will not use it."); load(); }}>Mark superseded</button>
+          <button onClick={() => setSupersedePrompt(null)}>Keep both</button>
+        </div>
+      </div>}
 
       <section className="panel">
         <h2>1 · Dump anything. Tribe files it.</h2>
@@ -148,7 +157,7 @@ export default function App() {
                 })()}
                 {m.promoted_memory_id
                   ? <span className="meta">Saved as memory #{m.promoted_memory_id} ✓</span>
-                  : <button onClick={async () => { if (sessionId) { const r = await api(`/api/sessions/${sessionId}/messages/${m.id}/promote`, { method: "POST" }); setNotice(`Saved as memory #${r.memory.id} — now part of this session's knowledge, linked to its sources.`); load(); } }}>Save as memory</button>}
+                  : <button onClick={async () => { if (sessionId) { const r = await api(`/api/sessions/${sessionId}/messages/${m.id}/promote`, { method: "POST" }); setNotice(`Saved as memory #${r.memory.id} — now part of this session's knowledge, linked to its sources.`); if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title }); load(); } }}>Save as memory</button>}
               </div>
             </div>
           ))}
@@ -181,7 +190,7 @@ export default function App() {
               <div className="row between"><strong>{m.title}</strong><span className="badge">{m.type}</span></div>
               <p>{m.body}</p>
               <p className="meta">confidence {m.confidence.toFixed(2)} · verified {ago(m.last_verified)} · {m.versions} past version(s) · via {m.source}
-                {m.stale && m.status === "active" ? " · STALE — check before obeying" : ""}{m.status !== "active" ? ` · ${m.status.toUpperCase()}` : ""}</p>
+                {m.stale && m.status === "active" ? " · STALE — check before obeying" : ""}{m.status !== "active" ? ` · ${m.status.toUpperCase()}` : ""}{m.valid_to ? ` · was true until ${m.valid_to.slice(0, 10)}` : ""}</p>
               {m.index_keys && m.index_keys.length > 0 && <p className="meta">Findable via: {m.index_keys.slice(0, 6).join(" · ")}{m.index_keys.length > 6 ? ` · +${m.index_keys.length - 6} more` : ""}</p>}
               {m.connections && m.connections.length > 0 && <p className="meta">Connections: {m.connections.map((c, i) => <span key={i}>{c.direction === "to" ? `${c.kind} → ${c.title}` : `${c.title} —${c.kind}→ this`}{i < (m.connections?.length || 0) - 1 ? " · " : ""}</span>)}</p>}
               <div className="row">

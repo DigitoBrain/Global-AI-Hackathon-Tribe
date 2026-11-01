@@ -133,6 +133,13 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: Right knowledge in wrong phrasing is the most common retrieval failure; a single index cannot serve keyword, recency, trust, and relationship queries equally. Explainable fusion makes trust inspectable instead of asserted, and validated evolution improves findability without polluting curated knowledge.
 - Consequences: Semantic/embedding retrieval, if added later (e.g. a local embedding model), plugs in as one more signal in the fusion — not a rewrite. Demo may claim: multiple indexes, explainable citations, and an index that learns from failed questions under validation.
 
+## D-018 — Temporal validity: retired facts cannot be served as current answers
+
+- Status: Decided (user-directed, 2026-10-31); implemented same day
+- Decision: (1) **Hard gate** — current (non-temporal) answers retrieve only currently-valid memories; `superseded`/`deprecated` memories are excluded outright, not merely demoted, and remain available only to evolution/history questions. (2) **Validity window** — superseding a memory records `valid_to` (when it stopped being true), shown on its card as "was true until …"; the seeded old runbook carries one. (3) **Write-time supersession suggestion** — on capture or promotion, a deterministic check (shared topic/type, high content overlap, differing values; no model call) may prompt "This looks like it replaces X — mark X superseded?" The user decides; nothing is auto-retired, per D-016.
+- Why: Demotion still leaks: a retired fact that is the only match, or the closest phrasing match, can be served as current truth. A validity gate makes the stale-answer failure structurally impossible for current questions while preserving full history for evolution answers.
+- Consequences: Demo may claim a superseded fact cannot be served as the current answer (regression-tested: the restart question cites only active memories and the wrapper procedure). Future as-of-date queries can build on `valid_to`.
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace

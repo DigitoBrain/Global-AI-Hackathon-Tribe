@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS links (
 `);
 try { db.exec("ALTER TABLE messages ADD COLUMN promoted_memory_id INTEGER"); } catch { /* already present */ }
 try { db.exec("ALTER TABLE memories ADD COLUMN index_keys TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
+try { db.exec("ALTER TABLE memories ADD COLUMN valid_to TEXT"); } catch { /* already present */ }
 db.exec(`CREATE TABLE IF NOT EXISTS index_evolutions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, memory_id INTEGER NOT NULL, question TEXT NOT NULL,
   added_keys TEXT NOT NULL DEFAULT '[]', validated INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
@@ -202,9 +203,11 @@ export function updateMemory(id, input) {
   db.prepare("INSERT INTO versions (memory_id,title,body,created_at) VALUES (?,?,?,?)")
     .run(id, old.title, old.body, now());
   const scrubbed = scrubSecrets(input.body ?? old.body);
-  db.prepare("UPDATE memories SET title=?,body=?,type=?,status=?,confidence=?,updated_at=? WHERE id=?")
+  const nextStatus = input.status ?? old.status;
+  db.prepare("UPDATE memories SET title=?,body=?,type=?,status=?,confidence=?,valid_to=?,updated_at=? WHERE id=?")
     .run(input.title ?? old.title, scrubbed.text, input.type ?? old.type,
-      input.status ?? old.status, input.confidence ?? old.confidence, now(), id);
+      nextStatus, input.confidence ?? old.confidence,
+      nextStatus === "superseded" ? (old.valid_to || now()) : old.valid_to, now(), id);
   return getMemory(id);
 }
 
@@ -241,7 +244,7 @@ export function createLink(fromId, toId, kind = "related") {
     .run(fromId, toId, kind, now());
   if (kind === "supersedes") {
     db.prepare("UPDATE memories SET supersedes_id=?,updated_at=? WHERE id=?").run(toId, now(), fromId);
-    db.prepare("UPDATE memories SET status='superseded',updated_at=? WHERE id=?").run(now(), toId);
+    db.prepare("UPDATE memories SET status='superseded',valid_to=?,updated_at=? WHERE id=?").run(now(), now(), toId);
   }
   return listLinksFor(fromId);
 }
@@ -354,6 +357,32 @@ export function graphAuthority() {
   return map;
 }
 
+// Temporal validity: current answers may only draw on currently-valid memories.
+// Retired (superseded/deprecated) facts remain available to evolution/history
+// questions, but can never be served as the current answer.
+export function currentPool(pool, temporal) {
+  return temporal ? pool : pool.filter((m) => m.status !== "superseded" && m.status !== "deprecated");
+}
+
+export function findSupersessionCandidate(memory, pool) {
+  const mine = new Set(tok(`${memory.title} ${memory.body}`).filter((w) => w.length > 3 && !KEY_STOP.has(w)));
+  const myNums = new Set([...`${memory.title} ${memory.body}`.matchAll(/\d+/g)].map((x) => x[0]));
+  let best = null;
+  for (const c of pool) {
+    if (c.id === memory.id || c.status !== "active") continue;
+    const sharedTag = (c.tags || []).some((t) => (memory.tags || []).includes(t));
+    if (!sharedTag && c.type !== memory.type) continue;
+    const theirs = new Set(tok(`${c.title} ${c.body}`).filter((w) => w.length > 3 && !KEY_STOP.has(w)));
+    const overlap = [...mine].filter((w) => theirs.has(w)).length / Math.max(1, Math.min(mine.size, theirs.size));
+    const theirNums = new Set([...`${c.title} ${c.body}`.matchAll(/\d+/g)].map((x) => x[0]));
+    const valueDiffers = [...myNums].some((n) => !theirNums.has(n)) || [...theirNums].some((n) => !myNums.has(n));
+    if (overlap >= 0.3 && (sharedTag || valueDiffers) && (!best || overlap > best.overlap)) {
+      best = { memory_id: c.id, title: c.title, overlap: Number(overlap.toFixed(2)) };
+    }
+  }
+  return best;
+}
+
 export function isTemporalQuery(query) {
   return /how (has|have|did)|changed|change over|evolv|history|used to|over time|why (do|is|are) (we|it)|this way now|previously|before we/i.test(String(query));
 }
@@ -369,8 +398,10 @@ export function evolutionChain(pool, topic) {
 const fmtDate = (iso) => new Date(iso).toISOString().slice(0, 10);
 
 export async function groundedAsk(query, sessionId) {
-  const pool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
-  const ranked = searchMemories(query, pool, {
+  const allPool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
+  const temporal = isTemporalQuery(query);
+  const pool = currentPool(allPool, temporal);
+  const ranked = searchMemories(query, temporal ? allPool : pool, {
     graph: graphAuthority(),
     sessionIds: sessionId ? new Set(pool.map((m) => m.id)) : new Set(),
   });

@@ -64,6 +64,7 @@ See [docs/decisions.md](docs/decisions.md) for rationale. Summary:
 15. **D-015 Simplified surface (implemented 2026-10-31):** exactly three UI sections — Capture, one chat-style Context Session (persistent, grounded; brief/guardrail/evolution inside the chat), Memories. Sessions travel via MCP (`list_sessions`/`create_session`/`pull_context`/`push_context`/`append_chat`) for IDE continuation.
 16. **D-016 Promotion gate + links (implemented 2026-10-31):** chat messages are never auto-Memories; **Save as memory** on any bubble promotes it (attached to session, `derived_from` links to cited sources). Memory connections are an explicit `links` table (manual / lifecycle / on-promote), shown on cards.
 17. **D-017 Multi-index + self-evolving keys (implemented 2026-10-31):** fused signals (keyword, learned keys, chronology, trust, graph, session) with plain-language `why` on every citation; failed questions can trigger validated index-key evolution (**Improve findability**) — bodies never auto-rewritten. Proactive question simulation is roadmap.
+18. **D-018 Temporal validity (implemented 2026-10-31):** superseded/deprecated are hard-excluded from current answers (history only), `valid_to` recorded on supersession, and capture/promote suggests "this replaces X?" for one-click human-confirmed supersession.
 
 ## The plan (canonical copy)
 

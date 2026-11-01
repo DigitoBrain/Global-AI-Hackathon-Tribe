@@ -17,6 +17,7 @@ code, pre { font-family: Consolas, monospace; font-size: 12px; }
 .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
 @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
 .notice { margin-top: 12px; background: #e3efe6; border: 1px solid #9dbfa8; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+.notice.warnbox { background: #f7ecd2; border-color: #d9b96a; }
 .badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: #e7ece8; color: #33413a; white-space: nowrap; }
 .badge.ok { background: #cfe8d6; } .badge.warn { background: #f3e2b3; }
 .head-actions { display: flex; gap: 8px; align-items: center; }

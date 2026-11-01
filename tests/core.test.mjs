@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scrubSecrets } from "../server/scrub.mjs";
-import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys } from "../server/store.mjs";
+import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate } from "../server/store.mjs";
 
 test("scrub redacts api keys and bearer tokens", () => {
   const r = scrubSecrets("api_key=sk-test1234567890 and Bearer abcdefghijklmnop");
@@ -61,6 +61,26 @@ test("multi-index fusion explains itself and learned keys make a memory findable
   assert.ok(hits[0].signals.learned_keys > 0);
   assert.ok(hits[0].why.some((w) => w.includes("learned keys")));
   assert.ok(deterministicKeys("Checkout pool", "pool pool latency", ["checkout"]).includes("checkout"));
+});
+
+test("temporal validity: retired facts leave current answers but stay in history", () => {
+  const pool = [
+    { id: 1, title: "Old", status: "superseded" },
+    { id: 2, title: "Current", status: "active" },
+    { id: 3, title: "Gone", status: "deprecated" },
+  ];
+  assert.deepEqual(currentPool(pool, false).map((m) => m.id), [2]);
+  assert.deepEqual(currentPool(pool, true).map((m) => m.id), [1, 2, 3]);
+});
+
+test("write-time supersession candidate: same topic, overlapping, different value", () => {
+  const fresh = { id: 9, title: "Checkout runbook v2", body: "checkout latency: check pool saturation, pool size is 80, use rollout restart wrapper", tags: ["checkout"], type: "runbook", status: "active" };
+  const pool = [
+    fresh,
+    { id: 5, title: "Checkout runbook", body: "checkout latency: check pool saturation, pool size is 50, use rollout restart wrapper", tags: ["checkout"], type: "runbook", status: "active" },
+    { id: 6, title: "Lunch", body: "sandwich order for friday", tags: ["food"], type: "note", status: "active" },
+  ];
+  assert.equal(findSupersessionCandidate(fresh, pool)?.memory_id, 5);
 });
 
 test("promoted memory title comes from the message, truncated safely", () => {

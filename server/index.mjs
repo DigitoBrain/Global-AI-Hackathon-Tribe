@@ -6,7 +6,7 @@ import {
   listSessions, getSession, createSession, updateSession, attachMemory, detachMemory,
   addOpenQuestion, evolutionChain, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
   listMessages, sessionChat, repoRoot, promoteMessage, createLink,
-  enrichMemoryKeys, evolveIndex, backfillKeys,
+  enrichMemoryKeys, evolveIndex, backfillKeys, findSupersessionCandidate,
 } from "./store.mjs";
 import { seedIfEmpty, resetSeed } from "./seed.mjs";
 import { llmStatus, llmConfig } from "./llm.mjs";
@@ -28,7 +28,9 @@ app.post("/api/memories", async (req, res) => {
   const out = createMemory(req.body);
   if (req.body.sessionId) attachMemory(Number(req.body.sessionId), out.memory.id);
   const enriched = await enrichMemoryKeys(out.memory.id);
-  res.status(201).json({ ...out, memory: enriched ? withMeta(enriched) : out.memory });
+  const fresh = enriched || out.memory;
+  const suggestion = findSupersessionCandidate(fresh, listMemories());
+  res.status(201).json({ ...out, memory: withMeta(fresh), supersedes_suggestion: suggestion });
 });
 app.patch("/api/memories/:id", (req, res) => {
   const m = updateMemory(Number(req.params.id), req.body || {});
@@ -90,7 +92,8 @@ app.post("/api/sessions/:id/messages/:messageId/promote", async (req, res) => {
   if (!out) return res.status(404).json({ error: "message not found" });
   if (!out.already) await enrichMemoryKeys(out.memory.id);
   const fresh = getMemory(out.memory.id);
-  return res.status(out.already ? 200 : 201).json({ ...out, memory: fresh ? withMeta(fresh) : out.memory });
+  const suggestion = fresh && !out.already ? findSupersessionCandidate(fresh, listMemories()) : null;
+  return res.status(out.already ? 200 : 201).json({ ...out, memory: fresh ? withMeta(fresh) : out.memory, supersedes_suggestion: suggestion });
 });
 app.post("/api/sessions/:id/evolve", async (req, res) => {
   if (!req.body?.question?.trim()) return res.status(400).json({ error: "question is required" });

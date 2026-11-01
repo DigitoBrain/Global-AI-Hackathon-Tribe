@@ -35,7 +35,8 @@ export function seedIfEmpty() {
   try {
     db.prepare("INSERT OR IGNORE INTO links (from_id,to_id,kind,created_at) VALUES (?,?,?,?)")
       .run(ids[0], ids[1], "supersedes", daysAgo(1));
-  } catch { /* links table created by store on server start */ }
+    db.prepare("UPDATE memories SET valid_to=? WHERE id=?").run(daysAgo(1), ids[1]);
+  } catch { /* links/valid_to created by store on server start */ }
   db.close();
   return true;
 }
