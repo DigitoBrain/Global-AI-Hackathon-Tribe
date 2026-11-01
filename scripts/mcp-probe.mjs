@@ -21,6 +21,8 @@ const pushed = await client.callTool({
 console.log("push_context:", pushed.content[0].text);
 const appended = await client.callTool({ name: "append_chat", arguments: { session_id: sid, content: "IDE client continued this session." } });
 console.log("append_chat:", appended.content[0].text);
+const source = await client.callTool({ name: "find_source", arguments: { query: "live checkout pool saturation metrics" } });
+console.log("find_source:", source.content[0].text.slice(0, 200));
 const pulled = await client.callTool({ name: "pull_context", arguments: { session_id: sid } });
 console.log("pull_context (same session continued):", pulled.content[0].text.slice(0, 400));
 await client.close();

@@ -143,11 +143,19 @@ export async function sessionChat(sessionId, userText) {
   const lastUser = [...history].reverse().find((m) => m.role === "user");
   const retrievalQuery = lastUser && isReferentialFollowup(userText) ? `${lastUser.content} ${userText}` : userText;
   const result = await groundedAsk(retrievalQuery, sessionId);
-  const answer = result.dontKnow && session.memories.length === 0
+  let answer = result.dontKnow && session.memories.length === 0
     ? "This session has no memories yet. Capture one above (it is added to this session) or attach existing memories from the list below, then ask again."
     : result.answer;
+  let sourcePointers = [];
+  if (result.dontKnow) {
+    sourcePointers = findSourceMemories(userText);
+    if (sourcePointers.length) {
+      const lines = sourcePointers.map((m) => `â€¢ ${m.title}: ${m.body}`);
+      answer = `${answer}\n\nNo stored answer covers this, but your tribal knowledge points to:\n${lines.join("\n")}`;
+    }
+  }
   const msg = addMessage(sessionId, "assistant", answer, result.citations || []);
-  return { message: msg, dontKnow: result.dontKnow, temporal: Boolean(result.temporal) };
+  return { message: msg, dontKnow: result.dontKnow, temporal: Boolean(result.temporal), sources: sourcePointers };
 }
 
 const KEY_STOP = new Set("the a an is are was were what why how do does did to of in on for and or it this that with when then than from into".split(" "));
@@ -261,7 +269,7 @@ export function listLinksFor(memoryId) {
 
 export function deriveMemoryTitle(content) {
   const first = String(content).replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0] || "Session memory";
-  return first.length > 72 ? `${first.slice(0, 69)}…` : first;
+  return first.length > 72 ? `${first.slice(0, 69)}â€¦` : first;
 }
 
 export function promoteMessage(sessionId, messageId) {
@@ -343,10 +351,10 @@ export function searchMemories(query, pool, opts = {}) {
     if (bodyHits.length) why.push(`matches ${bodyHits.slice(0, 4).join(", ")}`);
     if (keyHits.length) why.push(`found via learned keys: ${keyHits.slice(0, 3).join(", ")}`);
     if (signals.chronology > 0.8) why.push("recently verified");
-    else if (m.status === "active" && isStale(m)) why.push("stale — demoted");
+    else if (m.status === "active" && isStale(m)) why.push("stale â€” demoted");
     if (signals.graph > 0) why.push("linked from other memories");
     if (signals.session) why.push("in this session");
-    if (m.status === "superseded") why.push("superseded — history only");
+    if (m.status === "superseded") why.push("superseded â€” history only");
     return { memory: m, hits, score: Number(score.toFixed(2)), signals, why };
   }).filter((r) => r.hits > 0).sort((a, b) => b.score - a.score);
 }
@@ -419,7 +427,7 @@ export async function groundedAsk(query, sessionId) {
     const llmText = await llmChat(
       "Explain how this knowledge evolved over time, oldest to current, citing like [1]. End with the current position. Use only the evidence; if insufficient, say exactly: I don't know.",
       `Question: ${query}\nChronological evidence:\n${evidence}`);
-    const answer = llmText || chain.map((m, i) => `${fmtDate(m.created_at)} — ${m.title}: ${m.body.split(".")[0]}. [${i + 1}]`).join(" ");
+    const answer = llmText || chain.map((m, i) => `${fmtDate(m.created_at)} â€” ${m.title}: ${m.body.split(".")[0]}. [${i + 1}]`).join(" ");
     return { answer, citations, dontKnow: answer.startsWith("I don't know"), temporal: true };
   }
   const top = ranked.slice(0, 3);
@@ -433,7 +441,7 @@ export async function groundedAsk(query, sessionId) {
 }
 
 // Self-evolving index: learn from a failed question by revising a memory's
-// index keys — but a revision is stored only if validation shows the failed
+// index keys â€” but a revision is stored only if validation shows the failed
 // question now retrieves that memory and a guard question still retrieves it too.
 export async function evolveIndex(question, sessionId) {
   const pool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
@@ -469,6 +477,21 @@ export async function evolveIndex(question, sessionId) {
   return { question, before_hits: before.length, results, evolved: results.some((r) => r.validated) };
 }
 
+// Knowledge affordances are not a separate registry: they are Memories of
+// type "source" â€” tribal knowledge about who or what can provide which data
+// or capability, how to ask, and under what conditions. They are captured,
+// linked, verified and retired exactly like any other memory.
+export function scoreSourceMemory(query, m) {
+  const terms = tok(query).filter((w) => w.length >= 3 && !STOP.has(w));
+  const hay = new Set(tok(`${m.title} ${m.body} ${(m.tags || []).join(" ")}`));
+  return terms.filter((t) => hay.has(t)).length;
+}
+export function findSourceMemories(query, limit = 2) {
+  return listMemories().filter((m) => m.type === "source" && m.status === "active")
+    .map((m) => ({ memory: m, hits: scoreSourceMemory(query, m) }))
+    .filter((r) => r.hits > 0).sort((x, y) => y.hits - x.hits).slice(0, limit).map((r) => r.memory);
+}
+
 export function guardrailCheck(action) {
   const text = String(action).toLowerCase();
   const hits = listMemories().filter((m) => m.type === "guardrail" && m.status === "active")
@@ -481,4 +504,5 @@ export function guardrailCheck(action) {
     ? { blocked: true, guardrails: hits, message: `Stop. ${hits[0].title}. ${hits[0].body.split(".")[0]}.` }
     : { blocked: false, guardrails: [], message: "No guardrail matched this action." };
 }
+
 

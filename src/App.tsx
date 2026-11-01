@@ -38,6 +38,7 @@ export default function App() {
   const [share, setShare] = useState("");
   const [linkPick, setLinkPick] = useState<Record<number, { toId: number; kind: string }>>({});
   const [supersedePrompt, setSupersedePrompt] = useState<{ fromId: number; fromTitle: string; toId: number; toTitle: string } | null>(null);
+  const [dumpType, setDumpType] = useState("note");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const current = sessions.find((s) => s.id === sessionId);
@@ -59,7 +60,7 @@ export default function App() {
 
   const capture = async () => {
     if (!dump.trim()) return;
-    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, type: "note", source: "dump-box", sessionId: intoSession ? sessionId : null }) });
+    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, type: dumpType, source: "dump-box", sessionId: intoSession ? sessionId : null }) });
     setNotice(r.redactions ? `Captured and filed${intoSession && sessionId ? " into this session" : ""}. ${r.redactions} secret(s) redacted before storage.` : `Captured and filed${intoSession && sessionId ? " into this session" : ""} — no folder decision needed.`);
     if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title });
     setDump(""); setDumpTitle(""); load();
@@ -111,7 +112,15 @@ export default function App() {
         <h2>1 · Dump anything. Tribe files it.</h2>
         <input placeholder="Title (optional — Tribe will file it anyway)" value={dumpTitle} onChange={(e) => setDumpTitle(e.target.value)} />
         <textarea rows={3} placeholder="Paste a log, snippet, decision, failure… try including a fake api_key to see scrubbing" value={dump} onChange={(e) => setDump(e.target.value)} />
-        <label className="check"><input type="checkbox" checked={intoSession} onChange={(e) => setIntoSession(e.target.checked)} /> Add to current session</label>
+        <div className="row">
+          <label className="meta">Kind:</label>
+          <select value={dumpType} onChange={(e) => setDumpType(e.target.value)}>
+            <option value="note">note</option><option value="runbook">runbook</option><option value="guardrail">guardrail</option>
+            <option value="attempt">attempt</option><option value="decision">decision</option>
+            <option value="source">source — who/what can provide something</option>
+          </select>
+          <label className="check"><input type="checkbox" checked={intoSession} onChange={(e) => setIntoSession(e.target.checked)} /> Add to current session</label>
+        </div>
         <button className="primary" onClick={capture}>Capture memory</button>
       </section>
 
@@ -170,6 +179,7 @@ export default function App() {
           <button onClick={() => send("How has our checkout guidance changed over time?")}>How has guidance changed?</button>
           <button onClick={() => send("kubectl delete pods in prod checkout — is that OK?")}>Check a dangerous action</button>
           <button onClick={() => send("What is our office Wi-Fi password?")}>No-evidence question</button>
+          <button onClick={() => send("Whom should I ask about vendor escalation for payments?")}>Who can provide…?</button>
         </div>
         <div className="row composer">
           <input className="grow" placeholder="Ask this session… (Enter to send)" value={input}
@@ -180,8 +190,9 @@ export default function App() {
 
       <section className="panel">
         <h2>3 · Memories — latest verified wins, stale is demoted</h2>
+        <p className="meta">Including <strong>source</strong> memories: tribal knowledge about who or what can provide which data or capability. When no stored answer covers a question, Tribe points to one of these instead of guessing.</p>
         <div className="row chips">
-          {["all", "runbook", "guardrail", "attempt", "decision", "note"].map((f) =>
+          {["all", "runbook", "guardrail", "attempt", "decision", "note", "source"].map((f) =>
             <button key={f} className={filter === f ? "chip on" : "chip"} onClick={() => setFilter(f)}>{f}</button>)}
         </div>
         <div className="cards">

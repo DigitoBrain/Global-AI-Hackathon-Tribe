@@ -55,3 +55,5 @@ ul.evo li { padding: 7px 0; border-bottom: 1px solid #e3eae4; }
 .bubble-actions { margin-top: 8px; }
 .bubble-actions button { font-size: 12px; padding: 4px 9px; }
 .bubble.user .meta { color: #cfe3d6; }
+.srcform { margin: 14px 0 6px; padding: 12px; border: 1px dashed #b9c4bc; border-radius: 8px; }
+.srcform .row input { margin-bottom: 8px; }

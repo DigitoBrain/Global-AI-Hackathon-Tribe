@@ -140,6 +140,13 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: Demotion still leaks: a retired fact that is the only match, or the closest phrasing match, can be served as current truth. A validity gate makes the stale-answer failure structurally impossible for current questions while preserving full history for evolution answers.
 - Consequences: Demo may claim a superseded fact cannot be served as the current answer (regression-tested: the restart question cites only active memories and the wrapper procedure). Future as-of-date queries can build on `valid_to`.
 
+## D-019 — Who/what-can-provide knowledge lives in Memories, not a separate feature
+
+- Status: Decided (user-directed correction, 2026-10-31); implemented same day
+- Decision: Knowledge about who can do what — which person, team, system, tool or service can provide which data or capability, how to ask, and under what conditions — is tribal knowledge and is stored as ordinary Memories of type `source`. There is no separate source registry, table, or UI section (an initial separate-registry implementation was built and deliberately reverted within the same day at the user's direction). Source memories are captured (Capture has a `source` kind), promoted, linked, verified, evolved and retired exactly like any other memory. Retrieval treats them uniformly: "who can provide X / whom should I ask" questions answer directly from source memories with citations, and when no answer exists at all, chat falls back to pointing at a matching source memory. MCP exposes the same knowledge via `find_source`/`add_source`, which read/write source memories.
+- Why: "Who knows this" is some of the most valuable tribal knowledge there is; giving it a parallel system would recreate the fragmentation Tribe exists to remove, with separate staleness and trust problems. One store, one lifecycle, one trust model.
+- Consequences: Seed includes two source memories (payments on-call; observability dashboard). Demo may claim Tribe knows whom to ask when it doesn't know — and that this, too, is just a memory someone captured.
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace

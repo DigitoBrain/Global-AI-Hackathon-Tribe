@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scrubSecrets } from "../server/scrub.mjs";
-import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate } from "../server/store.mjs";
+import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory } from "../server/store.mjs";
 
 test("scrub redacts api keys and bearer tokens", () => {
   const r = scrubSecrets("api_key=sk-test1234567890 and Bearer abcdefghijklmnop");
@@ -81,6 +81,12 @@ test("write-time supersession candidate: same topic, overlapping, different valu
     { id: 6, title: "Lunch", body: "sandwich order for friday", tags: ["food"], type: "note", status: "active" },
   ];
   assert.equal(findSupersessionCandidate(fresh, pool)?.memory_id, 5);
+});
+
+test("source memories (who/what can provide) match by stored knowledge, not by noise", () => {
+  const src = { title: "Payments on-call can provide payment webhook knowledge", body: "Payments on-call can provide current retry limits and the vendor escalation path. Ask via Slack.", tags: ["payments", "source"] };
+  assert.ok(scoreSourceMemory("whom should I ask about vendor escalation for payments", src) >= 2);
+  assert.equal(scoreSourceMemory("what is our office wifi password", src), 0);
 });
 
 test("promoted memory title comes from the message, truncated safely", () => {
