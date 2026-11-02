@@ -152,7 +152,7 @@ export default function App() {
               <Md>{m.content}</Md>
               {m.citations?.length > 0 && <p className="meta">Sources: {m.citations.map((c) => `[${c.n}] ${c.title}${c.at ? ` (${c.at.slice(0, 10)})` : ""}${c.why?.length ? ` — ${c.why.join("; ")}` : ""}`).join(" · ")}</p>}
               <div className="bubble-actions">
-                {m.role === "assistant" && m.content.startsWith("I don't know") && sessionId && (() => {
+                {m.role === "assistant" && m.content.startsWith("I don't know") && m.citations?.length > 0 && sessionId && (() => {
                   const prevUser = [...messages.slice(0, idx)].reverse().find((x) => x.role === "user");
                   return prevUser ? <button onClick={async () => {
                     const r = await api(`/api/sessions/${sessionId}/evolve`, { method: "POST", body: JSON.stringify({ question: prevUser.content }) });

@@ -196,6 +196,13 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: The user model is "my tribal knowledge, available wherever I work." A brand-new session that cannot answer from existing Memories forces re-explaining — the exact cognitive load Tribe exists to remove — and made Save-as-memory feel local when it should publish to the whole store.
 - Consequences: New sessions answer from day one; the "this session has no memories yet" message now only appears when Tribe has no memories at all. Brief compilation remains session-focused (it summarises that session's filed context).
 
+## D-027 — MCP session pushes land in chat; durable writes need explicit "remember" intent
+
+- Status: Decided (user-directed, 2026-11-02); implemented same day. Extends D-016's "chat is not memory" rule to MCP.
+- Decision: Three distinct MCP verbs, steered by tool descriptions so client agents choose correctly: `post_to_session` (tell/update a session — the post enters chat, the session replies with retrieval/warning/simple acknowledgement as needed, and nothing becomes a Memory), `create_memory`/`push_context` (durable, generally-available Memory — only on explicit remember/store/create intent), and `append_chat` (silent log, no reply). If a user's request is genuinely ambiguous, the agent should ask rather than silently promote conversation into permanent knowledge.
+- Why: "Push this finding to my session" previously created a permanent Memory (an ephemeral queue-time alert became lasting knowledge). That breaks the same contract the web UI enforces with Save-as-memory: promotion to knowledge is a deliberate act, while a session is a counterpart that can react to what it is told.
+- Consequences: MCP parity is 25 tools (`post_to_session` aliases the chat handler); the probe asserts a session post gets a reply and creates no memory. README documents the two sentence shapes ("Tell my session…" vs "Remember this…").
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace

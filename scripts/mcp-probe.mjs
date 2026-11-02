@@ -9,7 +9,7 @@ const client = new Client({ name: "tribe-probe", version: "0.2.0" });
 await client.connect(transport);
 const tools = await client.listTools();
 console.log("tools:", tools.tools.map((t) => t.name).join(", "));
-const expected = ["list_sessions", "create_session", "get_session", "pull_context", "push_context", "append_chat", "list_messages", "chat", "ask", "promote_message", "add_open_question", "close_open_question", "create_memory", "list_memories", "search_memories", "get_memory", "update_memory", "verify_memory", "feedback_memory", "memory_versions", "find_source", "evolution", "guardrail_check", "evolve_index"];
+const expected = ["list_sessions", "create_session", "get_session", "pull_context", "push_context", "append_chat", "list_messages", "chat", "post_to_session", "ask", "promote_message", "add_open_question", "close_open_question", "create_memory", "list_memories", "search_memories", "get_memory", "update_memory", "verify_memory", "feedback_memory", "memory_versions", "find_source", "evolution", "guardrail_check", "evolve_index"];
 const missing = expected.filter((n) => !tools.tools.some((t) => t.name === n));
 if (missing.length) { console.error("MISSING TOOLS:", missing.join(", ")); process.exit(1); }
 console.log("parity toolset: all", expected.length, "expected tools present");
@@ -61,6 +61,11 @@ assert(JSON.parse(sessionDetail.content[0].text).memories?.length >= 2, "get_ses
 const chatted = await client.callTool({ name: "chat", arguments: { session_id: sid, message: "What do we know about checkout pool metrics?" } });
 const chatOut = JSON.parse(chatted.content[0].text);
 assert(Boolean(chatOut.message?.content), "chat stores and returns a grounded reply");
+const memCountBefore = JSON.parse((await client.callTool({ name: "list_memories", arguments: {} })).content[0].text).length;
+const posted = await client.callTool({ name: "post_to_session", arguments: { session_id: sid, message: "Queue-time alert fired twice today." } });
+assert(Boolean(JSON.parse(posted.content[0].text).message?.content), "post_to_session gets a session reply");
+const memCountAfter = JSON.parse((await client.callTool({ name: "list_memories", arguments: {} })).content[0].text).length;
+assert(memCountAfter === memCountBefore, "post_to_session does not create a memory");
 const msgs = await client.callTool({ name: "list_messages", arguments: { session_id: sid } });
 const msgList = JSON.parse(msgs.content[0].text);
 assert(msgList.some((m) => m.role === "assistant"), "list_messages shows the chat replies");

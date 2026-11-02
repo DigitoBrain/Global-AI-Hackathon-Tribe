@@ -35,7 +35,12 @@ Use **Reset demo** to restore the seed data at any time.
 
 ## MCP config
 
-**VS Code (Copilot Chat, agent mode):** this repo already ships `.vscode/mcp.json`. Open it and click **Start** above the `tribe` server (or run `MCP: List Servers`), enable the Tribe tools in Copilot Chat's tool picker, then try: “Use Tribe to list my context sessions”, “Pull the context for that session and summarise where things stand”, “Push a finding to that session…”, “Append that to the session chat…”. Watch the finding appear in the web app.
+**VS Code (Copilot Chat, agent mode):** this repo already ships `.vscode/mcp.json`. Open it and click **Start** above the `tribe` server (or run `MCP: List Servers`), enable the Tribe tools in Copilot Chat's tool picker, then try: “Use Tribe to list my context sessions”, “Pull the context for that session and summarise where things stand”. Watch the results appear in the web app.
+
+Two sentence shapes get two different results — pick by intent:
+
+- **Tell a session something** (lands in chat, the session replies, nothing becomes permanent): “Tell my Checkout session that the queue-time alert fired twice today.”
+- **Remember something for good** (becomes a generally-available Memory): “Use Tribe to remember this: never delete checkout pods in prod, use the rollout-restart wrapper.” Add “…and file it in my Checkout session” to also file it there.
 
 **Claude Code / Cursor:**
 

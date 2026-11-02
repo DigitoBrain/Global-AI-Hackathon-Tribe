@@ -48,12 +48,12 @@ async function storeMemory({ title, body, session_id }) {
 }
 
 server.tool("push_context",
-  "Push a finding into Tribe as a memory. No kind or category is needed: Tribe indexes the content and connects it to related memories automatically. Pass session_id to attach it to that context session so it grounds future answers there.",
+  "Store durable knowledge as a Tribe memory - ONLY when the user explicitly wants something remembered for good ('remember this', 'store this as a memory', 'create a memory'). The memory becomes generally available to every session. If the user is instead telling or updating a session ('tell my session...', 'push this finding to my session'), use post_to_session so it lands in chat and does not silently become permanent knowledge. No kind or category is needed: Tribe indexes the content and connects it to related memories automatically. Pass session_id to also file it into that context session.",
   { title: z.string(), body: z.string(), session_id: z.number().optional() },
   storeMemory);
 
 server.tool("create_memory",
-  "Create a Tribe memory from any AI client. Same write as push_context: no kind or category is needed, Tribe indexes the content and connects it to related memories automatically. Pass session_id to file it into that context session.",
+  "Create a generally-available Tribe memory - ONLY when the user explicitly asks to remember/store/create a memory. Same durable write as push_context: no kind or category is needed, Tribe indexes the content and connects it to related memories automatically. For conversational updates to a session, use post_to_session instead. Pass session_id to also file it into that context session.",
   { title: z.string(), body: z.string(), session_id: z.number().optional() },
   storeMemory);
 
@@ -119,7 +119,7 @@ server.tool("find_source",
     null, 2)));
 
 server.tool("append_chat",
-  "Append a message to a context session's chat history (e.g. record what was decided in the IDE), so the same conversation continues in the web app.",
+  "Silently append a message to a context session's chat history WITHOUT any reply (e.g. record what was decided in the IDE), so the same conversation continues in the web app. Use post_to_session instead when the session should respond to the post.",
   { session_id: z.number(), role: z.enum(["user", "assistant"]).optional(), content: z.string() },
   async ({ session_id, role, content }) => {
     if (!getSession(session_id)) return text(`Session ${session_id} not found. Use list_sessions or create_session.`);
@@ -144,15 +144,22 @@ server.tool("list_messages",
     return text(JSON.stringify(listMessages(session_id), null, 2));
   });
 
+async function chatInSession({ message, session_id }) {
+  const id = session_id || listSessions()[0]?.id;
+  if (!id || !getSession(id)) return text("No Tribe session found. Create one with create_session.");
+  const out = await sessionChat(id, message);
+  return text(JSON.stringify(out, null, 2));
+}
+
 server.tool("chat",
   "Chat inside a Tribe context session, exactly like the web app: the message is stored, warning memories block dangerous actions in-chat, temporal questions get evolution answers, and answers are grounded in your memories (all sessions share one memory pool; memories filed in this session rank higher) with citations or an explicit I don't know. Defaults to the most recently updated session.",
   { message: z.string(), session_id: z.number().optional() },
-  async ({ message, session_id }) => {
-    const id = session_id || listSessions()[0]?.id;
-    if (!id || !getSession(id)) return text("No Tribe session found. Create one with create_session.");
-    const out = await sessionChat(id, message);
-    return text(JSON.stringify(out, null, 2));
-  });
+  chatInSession);
+
+server.tool("post_to_session",
+  "Post a message, update, or finding INTO a context session's chat and get the session's grounded reply - use this when the user is telling or updating a session ('tell my test session...', 'push this finding to my session', 'let that session know...'). The session decides what the post needs (retrieval, a warning check, or a simple reply). Nothing becomes a permanent memory unless the user later saves it; for durable knowledge the user explicitly wants remembered, use create_memory instead. Defaults to the most recently updated session.",
+  { message: z.string(), session_id: z.number().optional() },
+  chatInSession);
 
 server.tool("ask",
   "Ask a grounded question across all Tribe memories without adding anything to chat history. Pass session_id only to boost memories filed in that session. Answers cite memories or say I don't know; temporal questions explain how knowledge evolved.",
