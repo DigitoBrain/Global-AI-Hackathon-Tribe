@@ -45,6 +45,10 @@ Use **Reset demo** to restore the seed data at any time.
 
 The server resolves its store from its own location, so the host's working directory does not matter, and no API key is needed for the MCP tools themselves.
 
+## Retrieval scorecard
+
+`npm run scorecard` runs golden questions against the store and prints measured retrieval quality: hit@3 for answerable questions (including paraphrases), correct “I don't know” for no-evidence questions, and hard gates — retired memories must never leak into current answers, evolution must walk history oldest-first, provider lookup and the guardrail must fire. Run it after **Reset demo** for the seeded numbers (`--reset` flag does that for you). It exits non-zero if a gate fails, so it doubles as a regression check. Known honest limit, visible in its output: a paraphrase sharing almost no words with its memory can miss — retrieval is keyword + learned-key based, with no embeddings.
+
 ## Architecture
 
 - React + Vite + TypeScript frontend, Node + Express API, SQLite (`node:sqlite`) in `data/tribe.db` — local-first, zero external services.

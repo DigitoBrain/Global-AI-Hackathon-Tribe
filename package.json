@@ -13,6 +13,7 @@
     "build": "vite build",
     "start": "node server/index.mjs",
     "mcp": "node mcp/server.mjs",
+    "scorecard": "node scripts/scorecard.mjs",
     "test": "node --test tests/core.test.mjs"
   },
   "dependencies": {
