@@ -189,6 +189,13 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: Tribal knowledge is runbooks, logs, and who-can-provide notes; headings, lists, code blocks, and tables make it scannable. AI clients already write markdown, so the previous plain rendering showed their syntax raw. Retrieval tokenises words and is unaffected.
 - Consequences: Capture stays "dump anything" — markdown is welcome but never required, and plain text still reads exactly as before.
 
+## D-026 — Memories are one global pool; sessions are conversations, not silos
+
+- Status: Decided (user-directed, 2026-11-02); implemented same day. Amends the session-scoped retrieval reading of D-015/D-016.
+- Decision: Every Context Session retrieves from **all** Memories. A session is a persistent conversation plus the context filed while working in it; being filed into the current session remains a ranking boost (`in this session` in the citation `why`), never a wall. A memory saved from any session's chat (Save as memory) or captured anywhere is immediately available to every other session. Session membership (D-023) still records where work happened and feeds the brief, open questions, and ranking — it no longer gates what can be answered.
+- Why: The user model is "my tribal knowledge, available wherever I work." A brand-new session that cannot answer from existing Memories forces re-explaining — the exact cognitive load Tribe exists to remove — and made Save-as-memory feel local when it should publish to the whole store.
+- Consequences: New sessions answer from day one; the "this session has no memories yet" message now only appears when Tribe has no memories at all. Brief compilation remains session-focused (it summarises that session's filed context).
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace

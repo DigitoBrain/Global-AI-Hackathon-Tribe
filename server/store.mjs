@@ -152,10 +152,19 @@ export async function sessionChat(sessionId, userText) {
   }
   // Iterative chat: only a referential follow-up ("and why?", "what about it?") inherits the previous question's context.
   const lastUser = [...history].reverse().find((m) => m.role === "user");
-  const retrievalQuery = lastUser && isReferentialFollowup(userText) ? `${lastUser.content} ${userText}` : userText;
-  const result = await groundedAsk(retrievalQuery, sessionId);
-  let answer = result.dontKnow && session.memories.length === 0
-    ? "This session has no memories yet. Capture one above (it is added to this session) or attach existing memories from the list below, then ask again."
+  const referential = Boolean(lastUser && isReferentialFollowup(userText));
+  const retrievalQuery = referential ? `${lastUser.content} ${userText}` : userText;
+  // For a follow-up, the answerer also sees the previous exchange, so it can add
+  // what is new instead of restating the previous answer.
+  let previous = null;
+  if (referential) {
+    const at = history.lastIndexOf(lastUser);
+    const lastAnswer = [...history.slice(at + 1)].reverse().find((m) => m.role === "assistant");
+    previous = { question: lastUser.content, answer: lastAnswer?.content || "", followUp: userText };
+  }
+  const result = await groundedAsk(retrievalQuery, sessionId, { previous });
+  let answer = result.dontKnow && listMemories().length === 0
+    ? "Tribe has no memories yet. Capture one above, then ask again."
     : result.answer;
   let sourcePointers = [];
   if (result.dontKnow) {
@@ -221,13 +230,15 @@ export function backfillKeys() {
 export function createMemory(input) {
   const scrubbed = scrubSecrets(input.body || "");
   const t = now();
+  // No title given (web capture, MCP, promotion): derive it from the content itself.
+  const title = input.title?.trim() ? input.title.trim() : deriveMemoryTitle(scrubbed.text);
   const r = db.prepare(
     `INSERT INTO memories (title,body,type,tags,confidence,source,status,supersedes_id,scope,severity,created_at,updated_at,last_verified,index_keys)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    input.title || "Untitled memory", scrubbed.text, "memory",
+    title, scrubbed.text, "memory",
     "[]", input.confidence ?? 0.8, input.source || "manual",
     input.status || "active", input.supersedes_id || null, "", "", t, t, t,
-    JSON.stringify(input.index_keys?.length ? input.index_keys : deterministicKeys(input.title || "", scrubbed.text, input.tags || [])));
+    JSON.stringify(input.index_keys?.length ? input.index_keys : deterministicKeys(title, scrubbed.text, input.tags || [])));
   const id = Number(r.lastInsertRowid);
   autoLinkMemory(id);
   return { memory: getMemory(id), redactions: scrubbed.redactions };
@@ -450,14 +461,53 @@ export function evolutionChain(pool, topic) {
 }
 
 const fmtDate = (iso) => new Date(iso).toISOString().slice(0, 10);
+const sentencesOf = (text) => String(text || "").split(/\n+/)
+  .flatMap((l) => l.replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/, "").replace(/[*_`~]/g, "").split(/(?<=[.!?])\s+/))
+  .map((s) => s.trim()).filter(Boolean);
+const normSentence = (s) => s.replace(/\[\d+\]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+const cleanSentence = (s) => {
+  const t = s.replace(/^\[\d+\]\s*/, "").replace(/^Evidence:\s*/i, "").trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+};
+// Follow-up replies (model or fallback) must not restate the previous answer:
+// drop any sentence that already appeared there, verbatim or near-verbatim.
+export function dedupeAgainstPrevious(answer, previousAnswer) {
+  const prev = sentencesOf(previousAnswer).map((s) => new Set(normSentence(s).split(/[^a-z0-9]+/).filter((w) => w.length > 2)));
+  const kept = sentencesOf(answer).filter((s) => {
+    const words = new Set(normSentence(s).split(/[^a-z0-9]+/).filter((w) => w.length > 2));
+    return !prev.some((p) => {
+      const shared = [...words].filter((w) => p.has(w)).length;
+      return shared / Math.max(1, Math.min(words.size, p.size)) >= 0.6;
+    });
+  });
+  const cleaned = kept.map(cleanSentence).filter((s) => s.replace(/\[\d+\]/g, "").trim().length > 0);
+  return cleaned.length ? cleaned.join(" ") : "";
+}
+// Deterministic fallback: first sentence per source - but for a follow-up, skip
+// sentences the previous answer already gave, so offline mode does not repeat it.
+export function fallbackAnswer(top, previous) {
+  if (!previous) return top.map((r, i) => `${firstSentence(r.memory.body)}. [${i + 1}]`).join(" ");
+  const already = new Set(sentencesOf(previous.answer).map((s) => s.replace(/\[\d+\]/g, "").trim()));
+  const fresh = [];
+  top.forEach((r, i) => {
+    for (const s of sentencesOf(r.memory.body)) {
+      if (!already.has(s) && fresh.length < 2) fresh.push(`${cleanSentence(s)} [${i + 1}]`);
+    }
+  });
+  if (!fresh.length) return "The stored evidence doesn't say more about that beyond the previous answer.";
+  return dedupeAgainstPrevious(fresh.join(" "), previous.answer) || "The stored evidence doesn't say more about that beyond the previous answer.";
+}
 
-export async function groundedAsk(query, sessionId) {
-  const allPool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
+export async function groundedAsk(query, sessionId, opts = {}) {
+  // Memories are generally available to every session: retrieval always runs
+  // over the whole store. Being filed into the current session is a ranking
+  // boost (session signal), never a wall.
+  const allPool = listMemories().map(withMeta);
   const temporal = isTemporalQuery(query);
   const pool = currentPool(allPool, temporal);
   const ranked = searchMemories(query, temporal ? allPool : pool, {
     graph: graphAuthority(),
-    sessionIds: sessionId ? new Set(pool.map((m) => m.id)) : new Set(),
+    sessionIds: sessionId ? new Set((getSession(sessionId)?.memories || []).map((m) => m.id)) : new Set(),
   });
   if (!ranked.length || ranked[0].hits === 0) {
     return { answer: "I don't know. No memory in Tribe covers this, so I won't guess. Capture it as a memory once you find out.", citations: [], dontKnow: true };
@@ -479,10 +529,17 @@ export async function groundedAsk(query, sessionId) {
   const top = ranked.slice(0, 3);
   const citations = top.map((r, i) => ({ n: i + 1, memory_id: r.memory.id, title: r.memory.title, status: r.memory.status, stale: r.memory.stale, at: r.memory.created_at, why: r.why, signals: r.signals }));
   const evidence = top.map((r, i) => `[${i + 1}] ${r.memory.title} (confidence ${r.memory.confidence.toFixed(2)}): ${r.memory.body}`).join("\n");
-  const llmText = await llmChat(
-    "Answer only from the evidence. Cite like [1]. If evidence is insufficient, say exactly: I don't know.",
-    `Question: ${query}\nEvidence:\n${evidence}`);
-  const answer = llmText || top.map((r, i) => `${firstSentence(r.memory.body)}. [${i + 1}]`).join(" ");
+  const previous = opts.previous;
+  const system = previous
+    ? "Answer only from the evidence. Cite like [1], once per claim cluster. This is a follow-up: answer only what the follow-up asks, adding what is new - do not restate the previous answer. Write complete explanatory sentences in your own words; never output a bare evidence quote, and never start a sentence with a citation or an 'Evidence:' label. Where the evidence supports a mechanism or cause, connect it explicitly, using the evidence's own concrete details (timings, queue/load effects, conditions) rather than generic restatements. Do not fall back to a boundary sentence if the evidence contains any mechanism, sequence, or load/queue detail - explain at that level first, then note any limit in one short clause. Only if no such detail exists, say plainly: The stored evidence doesn't say more about that. If evidence is insufficient, say exactly: I don't know."
+    : "Answer only from the evidence. Cite like [1]. If evidence is insufficient, say exactly: I don't know.";
+  const prompt = previous
+    ? `Previous question: ${previous.question}\nPrevious answer: ${previous.answer}\nFollow-up: ${previous.followUp || query}\nEvidence:\n${evidence}`
+    : `Question: ${query}\nEvidence:\n${evidence}`;
+  const llmText = await llmChat(system, prompt, { maxTokens: 1500 });
+  const answer = llmText
+    ? (previous ? (dedupeAgainstPrevious(llmText, previous.answer) || "The stored evidence doesn't say more about that beyond the previous answer.") : llmText)
+    : fallbackAnswer(top, previous);
   return { answer, citations, dontKnow: answer.startsWith("I don't know"), ranked: top.map((r) => ({ memory_id: r.memory.id, score: r.score })) };
 }
 
@@ -490,9 +547,15 @@ export async function groundedAsk(query, sessionId) {
 // index keys â€” but a revision is stored only if validation shows the failed
 // question now retrieves that memory and a guard question still retrieves it too.
 export async function evolveIndex(question, sessionId) {
-  const pool = (sessionId ? (getSession(sessionId)?.memories || []) : listMemories()).map(withMeta);
-  const opts = { graph: graphAuthority(), sessionIds: new Set(pool.map((m) => m.id)) };
+  const pool = listMemories().map(withMeta);
+  const opts = { graph: graphAuthority(), sessionIds: new Set((getSession(sessionId)?.memories || []).map((m) => m.id)) };
   const before = searchMemories(question, pool, opts);
+  // Nothing in the pool is even related to this question: there is no memory to
+  // make more findable, and teaching an unrelated memory this question's keys
+  // would pollute the index. Refuse honestly instead.
+  if (!before.length) {
+    return { question, before_hits: 0, results: [], evolved: false, reason: "no_related_memory" };
+  }
   const candidates = pool.filter((m) => m.status === "active")
     .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0, 4);
   const results = [];

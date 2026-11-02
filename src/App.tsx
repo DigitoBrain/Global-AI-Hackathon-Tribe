@@ -73,9 +73,9 @@ export default function App() {
 
   const capture = async () => {
     if (!dump.trim()) return;
-    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, source: "captured-in-tribe", sessionId }) });
+    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle.trim() || undefined, body: dump, source: "captured-in-tribe", sessionId }) });
     const connected = (r.memory.connections || []).map((c: Connection) => c.title).filter(Boolean);
-    setNotice(`Captured.${sessionId ? " Added to your current session." : ""}${connected.length ? ` Connected to: ${connected.join(" · ")}.` : ""}${r.redactions ? ` ${r.redactions} secret(s) redacted before storage.` : ""}`);
+    setNotice(`Captured.${sessionId ? " Filed in your current session, and available to every session." : ""}${connected.length ? ` Connected to: ${connected.join(" · ")}.` : ""}${r.redactions ? ` ${r.redactions} secret(s) redacted before storage.` : ""}`);
     if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title });
     setDump(""); setDumpTitle(""); load();
   };
@@ -116,7 +116,7 @@ export default function App() {
 
       <section className="panel">
         <h2>1 · Dump anything. Tribe files it.</h2>
-        <input placeholder="Title (optional — Tribe will file it anyway)" value={dumpTitle} onChange={(e) => setDumpTitle(e.target.value)} />
+        <input placeholder="Title (optional — Tribe derives it from your text)" value={dumpTitle} onChange={(e) => setDumpTitle(e.target.value)} />
         <textarea rows={3} placeholder="Paste anything — a log, a warning, what you tried, who can help, a decision… Markdown is welcome; Tribe files and connects it either way." value={dump} onChange={(e) => setDump(e.target.value)} />
         <button className="primary" onClick={capture}>Capture memory</button>
       </section>
@@ -124,7 +124,7 @@ export default function App() {
       <section className="panel chat-panel">
         <div className="row between">
           <h2>2 · Context Session</h2>
-          <span className="meta">Grounded in this session’s memories · continues via MCP in your IDE</span>
+          <span className="meta">Grounded in your memories · continues via MCP in your IDE</span>
         </div>
         <div className="row">
           <select value={sessionId ?? ""} onChange={(e) => load(Number(e.target.value))}>
@@ -146,7 +146,7 @@ export default function App() {
         </div>
 
         <div className="chat" ref={chatRef}>
-          {messages.length === 0 && <div className="bubble assistant">This is your context session — ask anything. Answers are grounded in this session's memories, cite their sources, and say “I don’t know” when there is no evidence. Try a suggestion below.</div>}
+          {messages.length === 0 && <div className="bubble assistant">This is your context session — ask anything. Answers are grounded in your memories, cite their sources, and say “I don’t know” when there is no evidence. Try a suggestion below.</div>}
           {messages.map((m, idx) => (
             <div key={m.id} className={`bubble ${m.role}`}>
               <Md>{m.content}</Md>
@@ -156,18 +156,20 @@ export default function App() {
                   const prevUser = [...messages.slice(0, idx)].reverse().find((x) => x.role === "user");
                   return prevUser ? <button onClick={async () => {
                     const r = await api(`/api/sessions/${sessionId}/evolve`, { method: "POST", body: JSON.stringify({ question: prevUser.content }) });
-                    setNotice(r.evolved
-                      ? `Index evolved: “${r.results.find((x: { validated: boolean }) => x.validated)?.title}” learned new keys for that question (validated — the question now retrieves it). Ask again.`
-                      : "Tried to improve findability, but no revision passed validation, so the index was left unchanged.");
+                    setNotice(r.reason === "no_related_memory"
+                      ? "No existing memory seems related to that question, so there is nothing to make more findable. Capture the answer as a memory once you know it."
+                      : r.evolved
+                        ? `Index evolved: “${r.results.find((x: { validated: boolean }) => x.validated)?.title}” learned new keys for that question (validated — the question now retrieves it). Ask again.`
+                        : "Tried to improve findability, but no revision passed validation, so the index was left unchanged.");
                   }}>Improve findability for this question</button> : null;
                 })()}
                 {m.promoted_memory_id
                   ? <span className="meta">Saved as memory #{m.promoted_memory_id} ✓</span>
-                  : <button onClick={async () => { if (sessionId) { const r = await api(`/api/sessions/${sessionId}/messages/${m.id}/promote`, { method: "POST" }); setNotice(`Saved as memory #${r.memory.id} — now part of this session's knowledge, linked to its sources.`); if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title }); load(); } }}>Save as memory</button>}
+                  : <button onClick={async () => { if (sessionId) { const r = await api(`/api/sessions/${sessionId}/messages/${m.id}/promote`, { method: "POST" }); setNotice(`Saved as memory #${r.memory.id} — now available to every session, linked to its sources.`); if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title }); load(); } }}>Save as memory</button>}
               </div>
             </div>
           ))}
-          {sending && <div className="bubble assistant">Thinking from this session’s memories…</div>}
+          {sending && <div className="bubble assistant">Thinking from your memories…</div>}
         </div>
         <div className="row chips">
           <button onClick={() => send("What caused the checkout latency regression?")}>What caused it?</button>

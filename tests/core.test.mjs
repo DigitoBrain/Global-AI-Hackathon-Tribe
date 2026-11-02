@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scrubSecrets } from "../server/scrub.mjs";
-import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory, relatedCandidates, updateMemory, listVersions } from "../server/store.mjs";
+import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory, relatedCandidates, updateMemory, listVersions, fallbackAnswer, dedupeAgainstPrevious } from "../server/store.mjs";
 
 test("scrub redacts api keys and bearer tokens", () => {
   const r = scrubSecrets("api_key=sk-test1234567890 and Bearer abcdefghijklmnop");
@@ -96,6 +96,23 @@ test("connections are found from memory content without a user-chosen kind", () 
     { id: 6, title: "Lunch", body: "Sandwich order for Friday.", tags: [], confidence: 0.9, status: "active", updated_at: new Date().toISOString(), last_verified: new Date().toISOString() },
   ];
   assert.deepEqual(relatedCandidates(fresh, pool).map((m) => m.id), [5]);
+});
+
+test("follow-up fallback adds new evidence instead of repeating the previous answer", () => {
+  const top = [{ memory: { body: "Pool exhaustion caused the regression. Evidence: pool wait queue spiked 40s before p95 latency. Fix kept pool at 50." } }];
+  const previous = { answer: "Pool exhaustion caused the regression. [1]" };
+  const out = fallbackAnswer(top, previous);
+  assert.ok(out.toLowerCase().includes("pool wait queue spiked"), out);
+  assert.ok(!out.startsWith("Pool exhaustion caused the regression."), out);
+  assert.equal(fallbackAnswer(top, { answer: "Pool exhaustion caused the regression. Evidence: pool wait queue spiked 40s before p95 latency. Fix kept pool at 50." }),
+    "The stored evidence doesn't say more about that beyond the previous answer.");
+  const deduped = dedupeAgainstPrevious(
+    "Pool exhaustion caused the regression. [1] Evidence: pool wait queue spiked 40s before p95 latency. [1]",
+    "Pool exhaustion caused the regression. [1]");
+  assert.ok(deduped.toLowerCase().includes("pool wait queue spiked"), deduped);
+  assert.ok(!deduped.startsWith("Pool exhaustion caused the regression."), deduped);
+  const cleaned = dedupeAgainstPrevious("[1] Evidence: pool wait queue spiked 40s before p95 latency. [1]", "Unrelated previous answer.");
+  assert.equal(cleaned, "Pool wait queue spiked 40s before p95 latency.");
 });
 
 test("edit history: unknown memory edits fail cleanly and has no versions", () => {

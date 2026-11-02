@@ -145,7 +145,7 @@ server.tool("list_messages",
   });
 
 server.tool("chat",
-  "Chat inside a Tribe context session, exactly like the web app: the message is stored, warning memories block dangerous actions in-chat, temporal questions get evolution answers, and answers are grounded in that session's memories with citations or an explicit I don't know. Defaults to the most recently updated session.",
+  "Chat inside a Tribe context session, exactly like the web app: the message is stored, warning memories block dangerous actions in-chat, temporal questions get evolution answers, and answers are grounded in your memories (all sessions share one memory pool; memories filed in this session rank higher) with citations or an explicit I don't know. Defaults to the most recently updated session.",
   { message: z.string(), session_id: z.number().optional() },
   async ({ message, session_id }) => {
     const id = session_id || listSessions()[0]?.id;
@@ -155,7 +155,7 @@ server.tool("chat",
   });
 
 server.tool("ask",
-  "Ask a grounded question across all Tribe memories (or one session's memories when session_id is given) without adding anything to chat history. Answers cite memories or say I don't know; temporal questions explain how knowledge evolved.",
+  "Ask a grounded question across all Tribe memories without adding anything to chat history. Pass session_id only to boost memories filed in that session. Answers cite memories or say I don't know; temporal questions explain how knowledge evolved.",
   { question: z.string(), session_id: z.number().optional() },
   async ({ question, session_id }) => text(JSON.stringify(await groundedAsk(question, session_id || null), null, 2)));
 
