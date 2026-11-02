@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scrubSecrets } from "../server/scrub.mjs";
-import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory, relatedCandidates } from "../server/store.mjs";
+import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory, relatedCandidates, updateMemory, listVersions } from "../server/store.mjs";
 
 test("scrub redacts api keys and bearer tokens", () => {
   const r = scrubSecrets("api_key=sk-test1234567890 and Bearer abcdefghijklmnop");
@@ -96,6 +96,11 @@ test("connections are found from memory content without a user-chosen kind", () 
     { id: 6, title: "Lunch", body: "Sandwich order for Friday.", tags: [], confidence: 0.9, status: "active", updated_at: new Date().toISOString(), last_verified: new Date().toISOString() },
   ];
   assert.deepEqual(relatedCandidates(fresh, pool).map((m) => m.id), [5]);
+});
+
+test("edit history: unknown memory edits fail cleanly and has no versions", () => {
+  assert.equal(updateMemory(999999, { body: "nope" }), null);
+  assert.deepEqual(listVersions(999999), []);
 });
 
 test("promoted memory title comes from the message, truncated safely", () => {

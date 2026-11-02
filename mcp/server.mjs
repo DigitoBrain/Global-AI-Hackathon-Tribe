@@ -7,7 +7,7 @@ import {
   findSourceMemories, listMemories, isProviderMemory, getMemory, withMeta,
   searchMemories, graphAuthority, updateMemory, verifyMemory, autoLinkMemory,
   sessionChat, groundedAsk, promoteMessage, addFeedback, addOpenQuestion,
-  evolutionChain, guardrailCheck, evolveIndex,
+  removeOpenQuestion, evolutionChain, guardrailCheck, evolveIndex, listVersions,
 } from "../server/store.mjs";
 import { seedIfEmpty } from "../server/seed.mjs";
 
@@ -92,6 +92,14 @@ server.tool("update_memory",
     await enrichMemoryKeys(memory_id);
     const fresh = getMemory(memory_id);
     return text(`Updated memory #${fresh.id}: ${fresh.title} (status: ${fresh.status})`);
+  });
+
+server.tool("memory_versions",
+  "Read a memory's version history: the previous titles and bodies kept each time it was edited, newest first.",
+  { memory_id: z.number() },
+  async ({ memory_id }) => {
+    if (!getMemory(memory_id)) return text(`Memory ${memory_id} not found. Use list_memories or search_memories.`);
+    return text(JSON.stringify(listVersions(memory_id), null, 2));
   });
 
 server.tool("verify_memory",
@@ -179,6 +187,15 @@ server.tool("add_open_question",
     const s = addOpenQuestion(session_id, question);
     if (!s) return text(`Session ${session_id} not found, or the question was empty. Use list_sessions.`);
     return text(`Open question added to session ${session_id}. Open questions now: ${s.open_questions.join(" | ")}`);
+  });
+
+server.tool("close_open_question",
+  "Mark an open question in a context session as resolved, removing it from the session's open list. Identify it by its exact question text, or by its zero-based index from get_session/pull_context.",
+  { session_id: z.number(), question: z.string().optional(), index: z.number().optional() },
+  async ({ session_id, question, index }) => {
+    const out = removeOpenQuestion(session_id, { question, index });
+    if (!out) return text(`Open question not found in session ${session_id}. Use get_session to see the open questions.`);
+    return text(`Resolved open question in session ${session_id}: "${out.removed}". Still open: ${out.session.open_questions.length ? out.session.open_questions.join(" | ") : "(none)"}`);
   });
 
 server.tool("evolution",

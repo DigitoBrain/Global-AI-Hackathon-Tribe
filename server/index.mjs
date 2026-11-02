@@ -2,11 +2,11 @@ import express from "express";
 import path from "node:path";
 import fs from "node:fs";
 import {
-  listMemories, getMemory, createMemory, updateMemory, addFeedback, verifyMemory,
+  listMemories, getMemory, createMemory, updateMemory, addFeedback, verifyMemory, listVersions,
   listSessions, getSession, createSession, updateSession, attachMemory, detachMemory,
-  addOpenQuestion, evolutionChain, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
+  addOpenQuestion, removeOpenQuestion, evolutionChain, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
   listMessages, sessionChat, repoRoot, promoteMessage, createLink,
-  enrichMemoryKeys, evolveIndex, backfillKeys, findSupersessionCandidate,
+  enrichMemoryKeys, evolveIndex, backfillKeys, findSupersessionCandidate, autoLinkMemory,
   findSourceMemories, isProviderMemory,
 } from "./store.mjs";
 import { seedIfEmpty, resetSeed } from "./seed.mjs";
@@ -33,9 +33,17 @@ app.post("/api/memories", async (req, res) => {
   const suggestion = findSupersessionCandidate(fresh, listMemories());
   res.status(201).json({ ...out, memory: withMeta(fresh), supersedes_suggestion: suggestion });
 });
-app.patch("/api/memories/:id", (req, res) => {
+app.get("/api/memories/:id/versions", (req, res) => {
+  return getMemory(Number(req.params.id))
+    ? res.json(listVersions(Number(req.params.id)))
+    : res.status(404).json({ error: "not found" });
+});
+app.patch("/api/memories/:id", async (req, res) => {
   const m = updateMemory(Number(req.params.id), req.body || {});
-  return m ? res.json(withMeta(m)) : res.status(404).json({ error: "not found" });
+  if (!m) return res.status(404).json({ error: "not found" });
+  // Keep findability and connections honest after an edit, same as MCP update_memory.
+  if (req.body?.title || req.body?.body) { autoLinkMemory(m.id); await enrichMemoryKeys(m.id); }
+  return res.json(withMeta(getMemory(m.id) || m));
 });
 app.post("/api/memories/:id/feedback", (req, res) => {
   const m = addFeedback(Number(req.params.id), req.body?.signal === "down" ? "down" : "up");
@@ -65,6 +73,10 @@ app.delete("/api/sessions/:id/memories/:memoryId", (req, res) => {
 app.post("/api/sessions/:id/questions", (req, res) => {
   const s = addOpenQuestion(Number(req.params.id), req.body?.question || "");
   return s ? res.json(s) : res.status(400).json({ error: "question is required" });
+});
+app.delete("/api/sessions/:id/questions", (req, res) => {
+  const out = removeOpenQuestion(Number(req.params.id), req.body || {});
+  return out ? res.json(out.session) : res.status(404).json({ error: "session or open question not found" });
 });
 app.get("/api/sessions/:id/messages", (req, res) => {
   return getSession(Number(req.params.id))

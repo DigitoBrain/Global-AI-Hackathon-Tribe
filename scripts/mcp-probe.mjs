@@ -9,7 +9,7 @@ const client = new Client({ name: "tribe-probe", version: "0.2.0" });
 await client.connect(transport);
 const tools = await client.listTools();
 console.log("tools:", tools.tools.map((t) => t.name).join(", "));
-const expected = ["list_sessions", "create_session", "get_session", "pull_context", "push_context", "append_chat", "list_messages", "chat", "ask", "promote_message", "add_open_question", "create_memory", "list_memories", "search_memories", "get_memory", "update_memory", "verify_memory", "feedback_memory", "find_source", "evolution", "guardrail_check", "evolve_index"];
+const expected = ["list_sessions", "create_session", "get_session", "pull_context", "push_context", "append_chat", "list_messages", "chat", "ask", "promote_message", "add_open_question", "close_open_question", "create_memory", "list_memories", "search_memories", "get_memory", "update_memory", "verify_memory", "feedback_memory", "memory_versions", "find_source", "evolution", "guardrail_check", "evolve_index"];
 const missing = expected.filter((n) => !tools.tools.some((t) => t.name === n));
 if (missing.length) { console.error("MISSING TOOLS:", missing.join(", ")); process.exit(1); }
 console.log("parity toolset: all", expected.length, "expected tools present");
@@ -47,6 +47,8 @@ const updated = await client.callTool({
   arguments: { memory_id: memId, body: "Probe memory updated via MCP: checkout pool metrics readable and writable from any AI client." },
 });
 console.log("update_memory:", updated.content[0].text);
+const versions = await client.callTool({ name: "memory_versions", arguments: { memory_id: memId } });
+assert(JSON.parse(versions.content[0].text).length >= 1, "memory_versions shows the pre-edit text after update");
 const verified = await client.callTool({ name: "verify_memory", arguments: { memory_id: memId } });
 console.log("verify_memory:", verified.content[0].text);
 const feedback = await client.callTool({ name: "feedback_memory", arguments: { memory_id: memId, signal: "up" } });
@@ -68,6 +70,11 @@ console.log("promote_message:", promoted.content[0].text);
 assert(/Saved message|already memory/.test(promoted.content[0].text), "promote_message saves a chat message as memory");
 const openQ = await client.callTool({ name: "add_open_question", arguments: { session_id: sid, question: "Probe open question from MCP?" } });
 assert(/Open question added/.test(openQ.content[0].text), "add_open_question records the question");
+const closedQ = await client.callTool({ name: "close_open_question", arguments: { session_id: sid, question: "Probe open question from MCP?" } });
+console.log("close_open_question:", closedQ.content[0].text);
+assert(/Resolved open question/.test(closedQ.content[0].text), "close_open_question resolves the question");
+const afterClose = await client.callTool({ name: "get_session", arguments: { session_id: sid } });
+assert(!JSON.parse(afterClose.content[0].text).open_questions.includes("Probe open question from MCP?"), "resolved question is gone from the session");
 const evo = await client.callTool({ name: "evolution", arguments: { topic: "checkout" } });
 assert(JSON.parse(evo.content[0].text).chain?.length > 0, "evolution returns the topic chain");
 const guard = await client.callTool({ name: "guardrail_check", arguments: { action: "kubectl delete pods in prod to fix checkout" } });

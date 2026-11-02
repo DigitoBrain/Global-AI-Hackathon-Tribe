@@ -111,6 +111,16 @@ export function addOpenQuestion(sessionId, question) {
   db.prepare("UPDATE sessions SET open_questions=?,updated_at=? WHERE id=?").run(JSON.stringify(qs), now(), sessionId);
   return getSession(sessionId);
 }
+export function removeOpenQuestion(sessionId, { index, question } = {}) {
+  const s = getSession(sessionId);
+  if (!s) return null;
+  const qs = [...s.open_questions];
+  const at = Number.isInteger(index) ? index : qs.indexOf(String(question || "").trim());
+  if (at < 0 || at >= qs.length) return null;
+  const [removed] = qs.splice(at, 1);
+  db.prepare("UPDATE sessions SET open_questions=?,updated_at=? WHERE id=?").run(JSON.stringify(qs), now(), sessionId);
+  return { session: getSession(sessionId), removed };
+}
 
 export function isReferentialFollowup(text) {
   const t = String(text).trim();
@@ -255,6 +265,9 @@ export function verifyMemory(id) {
 
 export function versionCount(id) {
   return db.prepare("SELECT COUNT(*) c FROM versions WHERE memory_id=?").get(id).c;
+}
+export function listVersions(id) {
+  return db.prepare("SELECT * FROM versions WHERE memory_id=? ORDER BY id DESC").all(id);
 }
 
 export function isStale(m) {

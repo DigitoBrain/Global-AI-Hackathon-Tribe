@@ -17,6 +17,12 @@ type Citation = { n: number; title: string; status: string; stale?: boolean; at?
 type Message = { id: number; role: string; content: string; citations: Citation[]; created_at: string; promoted_memory_id?: number | null };
 type Connection = { memory_id: number; title: string; kind: string; direction: string };
 type Brief = { summary: string; llm?: string; memory_count: number; open_questions: string[] };
+type Version = { id: number; title: string; body: string; created_at: string };
+const SOURCE_LABELS: Record<string, string> = {
+  "dump-box": "Captured in Tribe", "captured-in-tribe": "Captured in Tribe",
+  mcp: "Pushed via MCP", "context-session": "Saved from chat", manual: "Captured",
+};
+const sourceLabel = (s: string) => SOURCE_LABELS[s] || s;
 
 const api = async (path: string, opts?: RequestInit) => {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -40,6 +46,11 @@ export default function App() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [supersedePrompt, setSupersedePrompt] = useState<{ fromId: number; fromTitle: string; toId: number; toTitle: string } | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [historyFor, setHistoryFor] = useState<number | null>(null);
+  const [versions, setVersions] = useState<Version[]>([]);
   const chatRef = useRef<HTMLDivElement>(null);
 
   const load = async (keepSid?: number | null) => {
@@ -62,7 +73,7 @@ export default function App() {
 
   const capture = async () => {
     if (!dump.trim()) return;
-    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, source: "dump-box", sessionId }) });
+    const r = await api("/api/memories", { method: "POST", body: JSON.stringify({ title: dumpTitle || "Captured without filing", body: dump, source: "captured-in-tribe", sessionId }) });
     const connected = (r.memory.connections || []).map((c: Connection) => c.title).filter(Boolean);
     setNotice(`Captured.${sessionId ? " Added to your current session." : ""}${connected.length ? ` Connected to: ${connected.join(" · ")}.` : ""}${r.redactions ? ` ${r.redactions} secret(s) redacted before storage.` : ""}`);
     if (r.supersedes_suggestion) setSupersedePrompt({ fromId: r.memory.id, fromTitle: r.memory.title, toId: r.supersedes_suggestion.memory_id, toTitle: r.supersedes_suggestion.title });
@@ -124,7 +135,11 @@ export default function App() {
           <input className="grow" placeholder="New session — e.g. Payments timeout investigation" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
           <button onClick={createSession}>Create session</button>
         </div>
-        {brief && <p className="briefline"><strong>Brief:</strong> {brief.summary} <span className="meta">({brief.memory_count} memories{brief.open_questions.length ? ` · open: ${brief.open_questions.join(" ")}` : ""})</span></p>}
+        {brief && <div className="briefline"><strong>Brief:</strong> {brief.summary} <span className="meta">({brief.memory_count} memories)</span>
+          {brief.open_questions.length > 0 && <div className="openqs">{brief.open_questions.map((q, i) => (
+            <span key={`${q}-${i}`} className="openq">Open: {q} <button onClick={async () => { if (sessionId) { await api(`/api/sessions/${sessionId}/questions`, { method: "DELETE", body: JSON.stringify({ index: i }) }); load(); } }}>Resolved</button></span>
+          ))}</div>}
+        </div>}
         <div className="row">
           <input className="grow" placeholder="Add an open question for this session" value={newQuestion} onChange={(e) => setNewQuestion(e.target.value)} />
           <button onClick={async () => { if (newQuestion.trim() && sessionId) { await api(`/api/sessions/${sessionId}/questions`, { method: "POST", body: JSON.stringify({ question: newQuestion.trim() }) }); setNewQuestion(""); load(); } }}>Add question</button>
@@ -176,12 +191,33 @@ export default function App() {
           {shown.map((m) => (
             <article key={m.id} className={`card ${m.status !== "active" ? "dim" : ""}`}>
               <div className="row between"><strong>{m.title}</strong></div>
-              <Md>{m.body}</Md>
-              <p className="meta">confidence {m.confidence.toFixed(2)} · verified {ago(m.last_verified)} · {m.versions} past version(s) · via {m.source}
+              {editingId === m.id ? (
+                <div className="editform">
+                  <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Title" />
+                  <textarea rows={6} value={editBody} onChange={(e) => setEditBody(e.target.value)} placeholder="Memory text (markdown welcome)" />
+                  <div className="row">
+                    <button className="primary" onClick={async () => { await api(`/api/memories/${m.id}`, { method: "PATCH", body: JSON.stringify({ title: editTitle, body: editBody }) }); setEditingId(null); setNotice("Memory updated — the previous text is kept in version history."); load(); }}>Save edit</button>
+                    <button onClick={() => setEditingId(null)}>Cancel</button>
+                  </div>
+                </div>
+              ) : <Md>{m.body}</Md>}
+              <p className="meta">confidence {m.confidence.toFixed(2)} · verified {ago(m.last_verified)} · Source: {sourceLabel(m.source)}
                 {m.stale && m.status === "active" ? " · STALE — check before obeying" : ""}{m.status !== "active" ? ` · ${m.status.toUpperCase()}` : ""}{m.valid_to ? ` · was true until ${m.valid_to.slice(0, 10)}` : ""}</p>
+              <p className="meta">{m.versions > 0
+                ? <button className="linkbtn" onClick={async () => { if (historyFor === m.id) { setHistoryFor(null); } else { setVersions(await api(`/api/memories/${m.id}/versions`)); setHistoryFor(m.id); } }}>{historyFor === m.id ? "Hide" : "Show"} {m.versions} past version(s)</button>
+                : "0 past versions — edit this memory and the current text becomes the first one"}</p>
+              {historyFor === m.id && versions.length > 0 && (
+                <div className="history">{versions.map((v) => (
+                  <div key={v.id} className="hentry">
+                    <p className="meta">{v.created_at.slice(0, 10)} · {v.title}</p>
+                    <Md>{v.body}</Md>
+                  </div>
+                ))}</div>
+              )}
               {m.index_keys && m.index_keys.length > 0 && <p className="meta">Findable via: {m.index_keys.slice(0, 6).join(" · ")}{m.index_keys.length > 6 ? ` · +${m.index_keys.length - 6} more` : ""}</p>}
               {m.connections && m.connections.length > 0 && <p className="meta">Connections: {m.connections.map((c, i) => <span key={i}>{c.direction === "to" ? `${c.kind} → ${c.title}` : `${c.title} —${c.kind}→ this`}{i < (m.connections?.length || 0) - 1 ? " · " : ""}</span>)}</p>}
               <div className="row">
+                <button onClick={() => { setEditingId(m.id); setEditTitle(m.title); setEditBody(m.body); }}>Edit</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "up" }) }); load(); }}>Useful</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/feedback`, { method: "POST", body: JSON.stringify({ signal: "down" }) }); load(); }}>Wrong / stale</button>
                 <button onClick={async () => { await api(`/api/memories/${m.id}/verify`, { method: "POST" }); load(); }}>Verify now</button>
