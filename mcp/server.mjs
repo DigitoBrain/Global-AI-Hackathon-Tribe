@@ -4,13 +4,16 @@ import { z } from "zod";
 import {
   getSession, listSessions, createSession, createMemory, attachMemory,
   compileBrief, listMessages, addMessage, enrichMemoryKeys, backfillKeys,
-  findSourceMemories, listMemories, isProviderMemory,
+  findSourceMemories, listMemories, isProviderMemory, getMemory, withMeta,
+  searchMemories, graphAuthority, updateMemory, verifyMemory, autoLinkMemory,
+  sessionChat, groundedAsk, promoteMessage, addFeedback, addOpenQuestion,
+  evolutionChain, guardrailCheck, evolveIndex,
 } from "../server/store.mjs";
 import { seedIfEmpty } from "../server/seed.mjs";
 
 seedIfEmpty();
 backfillKeys();
-const server = new McpServer({ name: "tribe", version: "0.2.0" });
+const server = new McpServer({ name: "tribe", version: "0.4.0" });
 const text = (t) => ({ content: [{ type: "text", text: t }] });
 
 server.tool("list_sessions",
@@ -37,14 +40,67 @@ server.tool("pull_context",
     return text(JSON.stringify(payload, null, 2));
   });
 
+async function storeMemory({ title, body, session_id }) {
+  const { memory, redactions } = createMemory({ title, body, source: "mcp" });
+  if (session_id) attachMemory(session_id, memory.id);
+  await enrichMemoryKeys(memory.id);
+  return text(`Stored memory #${memory.id}: ${memory.title}${session_id ? ` (attached to session ${session_id})` : ""} (secret redactions: ${redactions})`);
+}
+
 server.tool("push_context",
   "Push a finding into Tribe as a memory. No kind or category is needed: Tribe indexes the content and connects it to related memories automatically. Pass session_id to attach it to that context session so it grounds future answers there.",
   { title: z.string(), body: z.string(), session_id: z.number().optional() },
-  async ({ title, body, session_id }) => {
-    const { memory, redactions } = createMemory({ title, body, source: "mcp" });
-    if (session_id) attachMemory(session_id, memory.id);
-    await enrichMemoryKeys(memory.id);
-    return text(`Stored memory #${memory.id}: ${memory.title}${session_id ? ` (attached to session ${session_id})` : ""} (secret redactions: ${redactions})`);
+  storeMemory);
+
+server.tool("create_memory",
+  "Create a Tribe memory from any AI client. Same write as push_context: no kind or category is needed, Tribe indexes the content and connects it to related memories automatically. Pass session_id to file it into that context session.",
+  { title: z.string(), body: z.string(), session_id: z.number().optional() },
+  storeMemory);
+
+server.tool("list_memories",
+  "List Tribe memories so any AI client can read the user's tribal knowledge directly, newest activity first. Optionally filter by status (active, stale, deprecated, superseded).",
+  { status: z.string().optional(), limit: z.number().optional() },
+  async ({ status, limit }) => {
+    const all = listMemories().filter((m) => !status || m.status === status);
+    return text(JSON.stringify(all.slice(0, limit || all.length).map(withMeta), null, 2));
+  });
+
+server.tool("search_memories",
+  "Search Tribe memories with the same ranked retrieval the web app uses (keyword, learned keys, chronology, trust, links). Returns each match with its score and a plain-language why, newest trusted knowledge first.",
+  { query: z.string(), limit: z.number().optional() },
+  async ({ query, limit }) => {
+    const ranked = searchMemories(query, listMemories(), { graph: graphAuthority() });
+    return text(JSON.stringify(ranked.slice(0, limit || 5).map((r) => ({ ...withMeta(r.memory), score: r.score, why: r.why, signals: r.signals })), null, 2));
+  });
+
+server.tool("get_memory",
+  "Read one Tribe memory in full by id, including its connections and version count.",
+  { memory_id: z.number() },
+  async ({ memory_id }) => {
+    const m = getMemory(memory_id);
+    if (!m) return text(`Memory ${memory_id} not found. Use list_memories or search_memories.`);
+    return text(JSON.stringify(withMeta(m), null, 2));
+  });
+
+server.tool("update_memory",
+  "Update a Tribe memory's title and/or body, or retire it by setting status to deprecated or superseded. The previous text is kept in version history, secrets are scrubbed, and index keys and connections are refreshed automatically.",
+  { memory_id: z.number(), title: z.string().optional(), body: z.string().optional(), status: z.enum(["active", "deprecated", "superseded"]).optional() },
+  async ({ memory_id, title, body, status }) => {
+    const updated = updateMemory(memory_id, { title, body, status });
+    if (!updated) return text(`Memory ${memory_id} not found. Use list_memories or search_memories.`);
+    autoLinkMemory(memory_id);
+    await enrichMemoryKeys(memory_id);
+    const fresh = getMemory(memory_id);
+    return text(`Updated memory #${fresh.id}: ${fresh.title} (status: ${fresh.status})`);
+  });
+
+server.tool("verify_memory",
+  "Mark a Tribe memory as verified just now, refreshing its chronology/trust standing so current answers can rely on it.",
+  { memory_id: z.number() },
+  async ({ memory_id }) => {
+    if (!getMemory(memory_id)) return text(`Memory ${memory_id} not found. Use list_memories or search_memories.`);
+    const m = verifyMemory(memory_id);
+    return text(`Verified memory #${m.id}: ${m.title} (last_verified: ${m.last_verified})`);
   });
 
 server.tool("find_source",
@@ -62,5 +118,83 @@ server.tool("append_chat",
     const m = addMessage(session_id, role || "assistant", content);
     return text(`Recorded message #${m.id} in session ${session_id}.`);
   });
+
+server.tool("get_session",
+  "Read one context session in full: its open questions and the memories filed into it, with trust and connection metadata.",
+  { session_id: z.number() },
+  async ({ session_id }) => {
+    const s = getSession(session_id);
+    if (!s) return text(`Session ${session_id} not found. Use list_sessions or create_session.`);
+    return text(JSON.stringify({ ...s, memories: s.memories.map(withMeta) }, null, 2));
+  });
+
+server.tool("list_messages",
+  "Read a context session's full chat history in order, so any AI client can see exactly what was discussed there.",
+  { session_id: z.number() },
+  async ({ session_id }) => {
+    if (!getSession(session_id)) return text(`Session ${session_id} not found. Use list_sessions or create_session.`);
+    return text(JSON.stringify(listMessages(session_id), null, 2));
+  });
+
+server.tool("chat",
+  "Chat inside a Tribe context session, exactly like the web app: the message is stored, warning memories block dangerous actions in-chat, temporal questions get evolution answers, and answers are grounded in that session's memories with citations or an explicit I don't know. Defaults to the most recently updated session.",
+  { message: z.string(), session_id: z.number().optional() },
+  async ({ message, session_id }) => {
+    const id = session_id || listSessions()[0]?.id;
+    if (!id || !getSession(id)) return text("No Tribe session found. Create one with create_session.");
+    const out = await sessionChat(id, message);
+    return text(JSON.stringify(out, null, 2));
+  });
+
+server.tool("ask",
+  "Ask a grounded question across all Tribe memories (or one session's memories when session_id is given) without adding anything to chat history. Answers cite memories or say I don't know; temporal questions explain how knowledge evolved.",
+  { question: z.string(), session_id: z.number().optional() },
+  async ({ question, session_id }) => text(JSON.stringify(await groundedAsk(question, session_id || null), null, 2)));
+
+server.tool("promote_message",
+  "Save one message from a session's chat as a memory (the web app's Save as memory), so only that chosen message becomes generally available tribal knowledge. The new memory is derived-from linked to the memories the chat cited.",
+  { session_id: z.number(), message_id: z.number() },
+  async ({ session_id, message_id }) => {
+    const out = promoteMessage(session_id, message_id);
+    if (!out) return text(`Message ${message_id} not found in session ${session_id}. Use list_messages to find message ids.`);
+    if (!out.already) await enrichMemoryKeys(out.memory.id);
+    return text(out.already
+      ? `Message ${message_id} is already memory #${out.memory.id}: ${out.memory.title}`
+      : `Saved message ${message_id} as memory #${out.memory.id}: ${out.memory.title}`);
+  });
+
+server.tool("feedback_memory",
+  "Record feedback on a memory (signal up or down), adjusting its trust standing for future ranking, exactly like the feedback buttons in the web app.",
+  { memory_id: z.number(), signal: z.enum(["up", "down"]) },
+  async ({ memory_id, signal }) => {
+    const m = addFeedback(memory_id, signal);
+    if (!m) return text(`Memory ${memory_id} not found. Use list_memories or search_memories.`);
+    return text(`Feedback '${signal}' recorded on memory #${m.id}: ${m.title} (confidence now ${m.confidence})`);
+  });
+
+server.tool("add_open_question",
+  "Add an open question to a context session, so any client working in that session can see what is still unresolved.",
+  { session_id: z.number(), question: z.string() },
+  async ({ session_id, question }) => {
+    const s = addOpenQuestion(session_id, question);
+    if (!s) return text(`Session ${session_id} not found, or the question was empty. Use list_sessions.`);
+    return text(`Open question added to session ${session_id}. Open questions now: ${s.open_questions.join(" | ")}`);
+  });
+
+server.tool("evolution",
+  "Show how knowledge about a topic evolved over time: every memory mentioning the topic, oldest to current, including retired ones kept for history.",
+  { topic: z.string() },
+  async ({ topic }) => text(JSON.stringify(
+    { topic, chain: evolutionChain(listMemories().map(withMeta), topic) }, null, 2)));
+
+server.tool("guardrail_check",
+  "Check a planned action against Tribe's warning memories before doing it. Returns blocked with the warning when a memory prohibits or warns against the action.",
+  { action: z.string() },
+  async ({ action }) => text(JSON.stringify(guardrailCheck(action), null, 2)));
+
+server.tool("evolve_index",
+  "Help Tribe's index learn from a question that failed to find its memory: proposes new index keys for a memory and keeps them only if validation shows the question now retrieves it without breaking an existing lookup. Optionally scoped to a session.",
+  { question: z.string(), session_id: z.number().optional() },
+  async ({ question, session_id }) => text(JSON.stringify(await evolveIndex(question, session_id || null), null, 2)));
 
 await server.connect(new StdioServerTransport());

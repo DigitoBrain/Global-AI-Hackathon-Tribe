@@ -175,6 +175,13 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: A per-memory membership toggle asks the user to administer plumbing whose correct answer Tribe already knows from context, and its purpose ("why is this button here?") was not discoverable. If knowledge should stop grounding answers, the meaningful actions are correcting, verifying, deprecating, or superseding the memory itself.
 - Consequences: To work with older knowledge in a session, capture or promote it in that session's context (or push it there via a client); there is no membership checklist to maintain.
 
+## D-024 — MCP has the same capabilities as the web app
+
+- Status: Decided (user-directed, 2026-11-01); implemented same day
+- Decision: The MCP server is a full peer of the web app over the same store, not a reduced context bus. It exposes Memories directly (`list_memories`, `search_memories` with score/`why`, `get_memory`, `create_memory` — same write as `push_context`, kept for compatibility — `update_memory` with versioned/scrubbed/re-keyed edits and retirement via `deprecated`/`superseded`, `verify_memory`, `feedback_memory`), sessions (`list_sessions`, `create_session`, `get_session`, `pull_context`, `push_context`, `append_chat`, `list_messages`, `add_open_question`), grounded conversation (`chat` with in-chat warning blocks and evolution answers, stateless `ask`, `promote_message` as the Save-as-memory action), and knowledge services (`find_source`, `evolution`, `guardrail_check`, `evolve_index`). No kind/category parameter exists on any of them (D-022). Deliberate exclusions: the demo-only reset, and manual link wiring (connections are automatic, D-022/D-023).
+- Why: Users will use Tribe through whichever AI system is in front of them. If MCP could only pull a session brief and push findings, other clients could not browse, search, chat, correct, or retire the actual knowledge — the web app would remain the only full citizen, and tribal knowledge would fragment per client.
+- Consequences: Any connected AI client can now do everything the web app can do; corrections and retirements made from an IDE or another assistant immediately govern answers everywhere. `scripts/mcp-probe.mjs` asserts the full 22-tool parity set and exercises each capability.
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace
