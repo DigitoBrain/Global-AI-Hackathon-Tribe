@@ -285,9 +285,15 @@ export function listLinksFor(memoryId) {
   return [...out, ...inc];
 }
 
+// Memory bodies are markdown; one-line titles/summaries strip its markers first.
+export const plainFirstLine = (text) => String(text || "")
+  .split("\n").map((l) => l.replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/, "").replace(/[*_`~]/g, "").trim())
+  .find((l) => l.length > 0) || "";
+export const firstSentence = (text) => plainFirstLine(text).split(/(?<=[.!?])\s/)[0] || "";
+
 export function deriveMemoryTitle(content) {
-  const first = String(content).replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0] || "Session memory";
-  return first.length > 72 ? `${first.slice(0, 69)}â€¦` : first;
+  const first = firstSentence(content) || "Session memory";
+  return first.length > 72 ? `${first.slice(0, 69)}…` : first;
 }
 
 export function promoteMessage(sessionId, messageId) {
@@ -454,7 +460,7 @@ export async function groundedAsk(query, sessionId) {
     const llmText = await llmChat(
       "Explain how this knowledge evolved over time, oldest to current, citing like [1]. End with the current position. Use only the evidence; if insufficient, say exactly: I don't know.",
       `Question: ${query}\nChronological evidence:\n${evidence}`);
-    const answer = llmText || chain.map((m, i) => `${fmtDate(m.created_at)} â€” ${m.title}: ${m.body.split(".")[0]}. [${i + 1}]`).join(" ");
+    const answer = llmText || chain.map((m, i) => `${fmtDate(m.created_at)} â€” ${m.title}: ${firstSentence(m.body)}. [${i + 1}]`).join(" ");
     return { answer, citations, dontKnow: answer.startsWith("I don't know"), temporal: true };
   }
   const top = ranked.slice(0, 3);
@@ -463,7 +469,7 @@ export async function groundedAsk(query, sessionId) {
   const llmText = await llmChat(
     "Answer only from the evidence. Cite like [1]. If evidence is insufficient, say exactly: I don't know.",
     `Question: ${query}\nEvidence:\n${evidence}`);
-  const answer = llmText || top.map((r, i) => `${r.memory.body.split(".")[0]}. [${i + 1}]`).join(" ");
+  const answer = llmText || top.map((r, i) => `${firstSentence(r.memory.body)}. [${i + 1}]`).join(" ");
   return { answer, citations, dontKnow: answer.startsWith("I don't know"), ranked: top.map((r) => ({ memory_id: r.memory.id, score: r.score })) };
 }
 
@@ -531,7 +537,7 @@ export function guardrailCheck(action) {
     .sort((a, b) => b.overlap - a.overlap)
     .map((r) => r.memory);
   return hits.length
-    ? { blocked: true, guardrails: hits, message: `Stop. ${hits[0].title}. ${hits[0].body.split(".")[0]}.` }
+    ? { blocked: true, guardrails: hits, message: `Stop. ${hits[0].title}. ${firstSentence(hits[0].body)}.` }
     : { blocked: false, guardrails: [], message: "No warning memory matched this action." };
 }
 

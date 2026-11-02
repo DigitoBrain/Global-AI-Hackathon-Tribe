@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+// Memory bodies and chat replies are markdown: stored as plain text, rendered safely here (no raw HTML).
+const Md = ({ children }: { children: string }) => (
+  <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown></div>
+);
 
 type Memory = {
   id: number; title: string; body: string; tags: string[];
@@ -99,7 +106,7 @@ export default function App() {
       <section className="panel">
         <h2>1 · Dump anything. Tribe files it.</h2>
         <input placeholder="Title (optional — Tribe will file it anyway)" value={dumpTitle} onChange={(e) => setDumpTitle(e.target.value)} />
-        <textarea rows={3} placeholder="Paste anything — a log, a warning, what you tried, who can help, a decision… Tribe will file and connect it." value={dump} onChange={(e) => setDump(e.target.value)} />
+        <textarea rows={3} placeholder="Paste anything — a log, a warning, what you tried, who can help, a decision… Markdown is welcome; Tribe files and connects it either way." value={dump} onChange={(e) => setDump(e.target.value)} />
         <button className="primary" onClick={capture}>Capture memory</button>
       </section>
 
@@ -127,7 +134,7 @@ export default function App() {
           {messages.length === 0 && <div className="bubble assistant">This is your context session — ask anything. Answers are grounded in this session's memories, cite their sources, and say “I don’t know” when there is no evidence. Try a suggestion below.</div>}
           {messages.map((m, idx) => (
             <div key={m.id} className={`bubble ${m.role}`}>
-              <p>{m.content}</p>
+              <Md>{m.content}</Md>
               {m.citations?.length > 0 && <p className="meta">Sources: {m.citations.map((c) => `[${c.n}] ${c.title}${c.at ? ` (${c.at.slice(0, 10)})` : ""}${c.why?.length ? ` — ${c.why.join("; ")}` : ""}`).join(" · ")}</p>}
               <div className="bubble-actions">
                 {m.role === "assistant" && m.content.startsWith("I don't know") && sessionId && (() => {
@@ -169,7 +176,7 @@ export default function App() {
           {shown.map((m) => (
             <article key={m.id} className={`card ${m.status !== "active" ? "dim" : ""}`}>
               <div className="row between"><strong>{m.title}</strong></div>
-              <p>{m.body}</p>
+              <Md>{m.body}</Md>
               <p className="meta">confidence {m.confidence.toFixed(2)} · verified {ago(m.last_verified)} · {m.versions} past version(s) · via {m.source}
                 {m.stale && m.status === "active" ? " · STALE — check before obeying" : ""}{m.status !== "active" ? ` · ${m.status.toUpperCase()}` : ""}{m.valid_to ? ` · was true until ${m.valid_to.slice(0, 10)}` : ""}</p>
               {m.index_keys && m.index_keys.length > 0 && <p className="meta">Findable via: {m.index_keys.slice(0, 6).join(" · ")}{m.index_keys.length > 6 ? ` · +${m.index_keys.length - 6} more` : ""}</p>}

@@ -71,6 +71,7 @@ See [docs/decisions.md](docs/decisions.md) for rationale. Summary:
 22. **D-022 One Memory primitive (implemented 2026-11-01):** no semantic Kind anywhere (Capture, promotion, MCP, cards, filters). Memories self-file into the current session and auto-link to related memories; warnings/tried/provider meaning is read from content at use time. The Memory primitive is deliberately minimal — content, provenance, trust, validity, keys, links, versions.
 23. **D-023 Session membership by working (implemented 2026-11-01):** no per-memory "In/Add to session" button; membership comes from capturing/promoting/pushing while in that session. Chat scrolling stays inside the chat panel.
 24. **D-024 MCP = web app parity (implemented 2026-11-01):** MCP is a full peer over the same store — 22 tools covering memories, sessions, in-session `chat`/`ask`/`promote_message`, and `find_source`/`evolution`/`guardrail_check`/`evolve_index`; only demo reset and manual link wiring are deliberately excluded. `scripts/mcp-probe.mjs` asserts the parity set.
+25. **D-025 Markdown memories (implemented 2026-11-01):** Memory bodies and chat replies are markdown — stored as plain text, rendered safely (GFM, no raw HTML) in the web app; no editor/toolbars. Titles and one-line summaries strip markdown markers.
 
 ## The plan (canonical copy)
 

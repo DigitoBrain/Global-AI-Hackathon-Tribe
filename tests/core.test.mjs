@@ -101,4 +101,6 @@ test("connections are found from memory content without a user-chosen kind", () 
 test("promoted memory title comes from the message, truncated safely", () => {
   assert.equal(deriveMemoryTitle("Pool exhaustion caused it. More detail follows here."), "Pool exhaustion caused it.");
   assert.ok(deriveMemoryTitle("x".repeat(200)).length <= 72);
+  assert.equal(deriveMemoryTitle("# Runbook\n\n- **Never** delete pods in prod. Use the wrapper."), "Runbook");
+  assert.equal(deriveMemoryTitle("- **Never** delete pods in prod. Use the wrapper."), "Never delete pods in prod.");
 });

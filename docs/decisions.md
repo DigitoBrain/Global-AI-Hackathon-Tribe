@@ -182,6 +182,13 @@ How to use: append new decisions, never silently rewrite a Decided item. To chan
 - Why: Users will use Tribe through whichever AI system is in front of them. If MCP could only pull a session brief and push findings, other clients could not browse, search, chat, correct, or retire the actual knowledge — the web app would remain the only full citizen, and tribal knowledge would fragment per client.
 - Consequences: Any connected AI client can now do everything the web app can do; corrections and retirements made from an IDE or another assistant immediately govern answers everywhere. `scripts/mcp-probe.mjs` asserts the full 22-tool parity set and exercises each capability.
 
+## D-025 — Memory bodies are markdown, rendered safely, with no editor burden
+
+- Status: Decided (user-directed, 2026-11-01); implemented same day
+- Decision: A Memory body (and chat replies) is markdown. It is stored as plain text exactly as written — no schema change, no format field, no markdown editor, toolbar, or mode toggle. The web app renders it with a safe markdown renderer (GFM tables/lists/code; raw HTML is not honoured, so a stored memory cannot inject markup). MCP already returns the raw text, which MCP clients render themselves. One-line titles and fallback summaries strip markdown markers so `#`/`-`/`**` never leak into titles.
+- Why: Tribal knowledge is runbooks, logs, and who-can-provide notes; headings, lists, code blocks, and tables make it scannable. AI clients already write markdown, so the previous plain rendering showed their syntax raw. Retrieval tokenises words and is unaffected.
+- Consequences: Capture stays "dump anything" — markdown is welcome but never required, and plain text still reads exactly as before.
+
 ## Unresolved (not yet decided — do not assume)
 
 - U-1: Meta Model API key/endpoint/model IDs — not yet confirmed in workspace
