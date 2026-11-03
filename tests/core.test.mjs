@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { scrubSecrets } from "../server/scrub.mjs";
-import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory, relatedCandidates, updateMemory, listVersions, fallbackAnswer, dedupeAgainstPrevious } from "../server/store.mjs";
+import { searchMemories, isTemporalQuery, evolutionChain, isReferentialFollowup, deriveMemoryTitle, sanitizeTitle, deterministicKeys, currentPool, findSupersessionCandidate, scoreSourceMemory, relatedCandidates, updateMemory, listVersions, fallbackAnswer, dedupeAgainstPrevious, isQuestionText } from "../server/store.mjs";
 
 test("scrub redacts api keys and bearer tokens", () => {
   const r = scrubSecrets("api_key=sk-test1234567890 and Bearer abcdefghijklmnop");
@@ -118,6 +118,21 @@ test("follow-up fallback adds new evidence instead of repeating the previous ans
 test("edit history: unknown memory edits fail cleanly and has no versions", () => {
   assert.equal(updateMemory(999999, { body: "nope" }), null);
   assert.deepEqual(listVersions(999999), []);
+});
+
+test("posted findings are statements, not questions", () => {
+  assert.equal(isQuestionText("The queue-time alert fired twice today."), false);
+  assert.equal(isQuestionText("Deployment finished and caches were flushed."), false);
+  assert.equal(isQuestionText("What caused the checkout latency regression?"), true);
+  assert.equal(isQuestionText("And why did that amplify it?"), true);
+  assert.equal(isQuestionText("Whom should I ask about vendor escalation"), true);
+});
+
+test("model-proposed titles are sanitised before use", () => {
+  assert.equal(sanitizeTitle('"Checkout Pool Exhaustion"'), "Checkout Pool Exhaustion");
+  assert.equal(sanitizeTitle("# Pool Saturation Runbook\nignored second line"), "Pool Saturation Runbook");
+  assert.equal(sanitizeTitle("   \n  "), "");
+  assert.ok(sanitizeTitle("word ".repeat(30)).length <= 72);
 });
 
 test("promoted memory title comes from the message, truncated safely", () => {

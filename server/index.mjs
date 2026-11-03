@@ -6,7 +6,7 @@ import {
   listSessions, getSession, createSession, updateSession, attachMemory, detachMemory,
   addOpenQuestion, removeOpenQuestion, evolutionChain, compileBriefSmart, groundedAsk, guardrailCheck, withMeta,
   listMessages, sessionChat, repoRoot, promoteMessage, createLink,
-  enrichMemoryKeys, evolveIndex, backfillKeys, findSupersessionCandidate, autoLinkMemory,
+  enrichMemoryKeys, enrichMemoryTitle, evolveIndex, backfillKeys, findSupersessionCandidate, autoLinkMemory,
   findSourceMemories, isProviderMemory,
 } from "./store.mjs";
 import { seedIfEmpty, resetSeed } from "./seed.mjs";
@@ -29,7 +29,8 @@ app.post("/api/memories", async (req, res) => {
   const out = createMemory(req.body);
   if (req.body.sessionId) attachMemory(Number(req.body.sessionId), out.memory.id);
   const enriched = await enrichMemoryKeys(out.memory.id);
-  const fresh = enriched || out.memory;
+  if (!req.body.title?.trim()) await enrichMemoryTitle(out.memory.id);
+  const fresh = getMemory(out.memory.id) || enriched || out.memory;
   const suggestion = findSupersessionCandidate(fresh, listMemories());
   res.status(201).json({ ...out, memory: withMeta(fresh), supersedes_suggestion: suggestion });
 });
@@ -103,7 +104,7 @@ app.get("/api/sessions/:id/brief", async (req, res) => {
 app.post("/api/sessions/:id/messages/:messageId/promote", async (req, res) => {
   const out = promoteMessage(Number(req.params.id), Number(req.params.messageId));
   if (!out) return res.status(404).json({ error: "message not found" });
-  if (!out.already) await enrichMemoryKeys(out.memory.id);
+  if (!out.already) { await enrichMemoryKeys(out.memory.id); await enrichMemoryTitle(out.memory.id); }
   const fresh = getMemory(out.memory.id);
   const suggestion = fresh && !out.already ? findSupersessionCandidate(fresh, listMemories()) : null;
   return res.status(out.already ? 200 : 201).json({ ...out, memory: fresh ? withMeta(fresh) : out.memory, supersedes_suggestion: suggestion });

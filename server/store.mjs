@@ -139,6 +139,12 @@ export function addMessage(sessionId, role, content, citations = []) {
   return { id: Number(r.lastInsertRowid), session_id: sessionId, role, content, citations, created_at: now() };
 }
 
+export function isQuestionText(text) {
+  const t = String(text || "").trim();
+  if (t.endsWith("?")) return true;
+  return /^(what|why|how|who|whom|when|where|which|can|could|should|would|do|does|did|is|are|was|were|tell me|explain|show me|give me|list)\b/i.test(t);
+}
+
 export async function sessionChat(sessionId, userText) {
   const session = getSession(sessionId);
   if (!session) return null;
@@ -149,6 +155,20 @@ export async function sessionChat(sessionId, userText) {
     const msg = addMessage(sessionId, "assistant", guard.message,
       guard.guardrails.map((g, i) => ({ n: i + 1, memory_id: g.id, title: g.title, status: g.status, at: g.created_at })));
     return { message: msg, guardrail: true };
+  }
+  // Being told something is not being asked something. A posted finding gets an
+  // acknowledgement tied to what the session knows - never an "I don't know",
+  // and never an automatic memory (promotion stays a deliberate act).
+  if (!isQuestionText(userText)) {
+    const related = searchMemories(userText, currentPool(listMemories().map(withMeta), false), { graph: graphAuthority() }).slice(0, 2);
+    const terms = new Set(tok(userText).filter((w) => w.length > 3));
+    const openHit = (session.open_questions || []).find((q) => tok(q).some((w) => terms.has(w)));
+    const ack = related.length
+      ? `Noted — recorded in this session's chat. It connects to “${related[0].memory.title}”${openHit ? `, and to your open question: “${openHit}”` : ""}. It isn't durable knowledge yet — Save as memory on your message if it should become a Memory.`
+      : `Noted — recorded in this session's chat. No stored memory covers this yet, so I won't speculate on it. Save as memory on your message if it should become durable knowledge.`;
+    const citations = related.map((r, i) => ({ n: i + 1, memory_id: r.memory.id, title: r.memory.title, status: r.memory.status, at: r.memory.created_at, why: r.why }));
+    const msg = addMessage(sessionId, "assistant", ack, citations);
+    return { message: msg, noted: true };
   }
   // Iterative chat: only a referential follow-up ("and why?", "what about it?") inherits the previous question's context.
   const lastUser = [...history].reverse().find((m) => m.role === "user");
@@ -318,6 +338,29 @@ export const firstSentence = (text) => plainFirstLine(text).split(/(?<=[.!?])\s/
 export function deriveMemoryTitle(content) {
   const first = firstSentence(content) || "Session memory";
   return first.length > 72 ? `${first.slice(0, 69)}…` : first;
+}
+// A model-proposed title is only trusted after sanitising: one line, no
+// markdown/quotes, short enough to scan in a citation.
+export function sanitizeTitle(text) {
+  const line = String(text || "").split("\n").map((l) => l.trim()).find((l) => l.length > 0) || "";
+  const clean = line.replace(/^#{1,6}\s+/, "").replace(/^["'`“”]+|["'`“”]+$/g, "").replace(/\*\*/g, "").trim();
+  if (!clean) return "";
+  return clean.length > 72 ? `${clean.slice(0, 69).replace(/\s+\S*$/, "")}…` : clean;
+}
+// Smarter title when none was provided: ask the model for a short label.
+// Callers invoke this only for auto-derived titles; a user/agent-supplied
+// title is never overwritten. Offline, the deterministic title simply stays.
+export async function enrichMemoryTitle(id) {
+  const m = getMemory(id);
+  if (!m) return null;
+  const text = await llmChat(
+    "Write a short title for this knowledge memory: 3-8 words, plain text only, no quotes, no trailing period. Name the topic, not the format.",
+    `Memory text:\n${m.body.slice(0, 600)}`, { maxTokens: 700 });
+  const title = sanitizeTitle(text);
+  if (title && title !== m.title) {
+    db.prepare("UPDATE memories SET title=?,updated_at=? WHERE id=?").run(title, now(), id);
+  }
+  return getMemory(id);
 }
 
 export function promoteMessage(sessionId, messageId) {
@@ -522,7 +565,7 @@ export async function groundedAsk(query, sessionId, opts = {}) {
     const evidence = chain.map((m, i) => `[${i + 1}] (${fmtDate(m.created_at)}, ${m.status}) ${m.title}: ${m.body}`).join("\n");
     const llmText = await llmChat(
       "Explain how this knowledge evolved over time, oldest to current, citing like [1]. End with the current position. Use only the evidence; if insufficient, say exactly: I don't know.",
-      `Question: ${query}\nChronological evidence:\n${evidence}`);
+      `Question: ${query}\nChronological evidence:\n${evidence}`, { maxTokens: 2500 });
     const answer = llmText || chain.map((m, i) => `${fmtDate(m.created_at)} â€” ${m.title}: ${firstSentence(m.body)}. [${i + 1}]`).join(" ");
     return { answer, citations, dontKnow: answer.startsWith("I don't know"), temporal: true };
   }
@@ -536,7 +579,7 @@ export async function groundedAsk(query, sessionId, opts = {}) {
   const prompt = previous
     ? `Previous question: ${previous.question}\nPrevious answer: ${previous.answer}\nFollow-up: ${previous.followUp || query}\nEvidence:\n${evidence}`
     : `Question: ${query}\nEvidence:\n${evidence}`;
-  const llmText = await llmChat(system, prompt, { maxTokens: 1500 });
+  const llmText = await llmChat(system, prompt, { maxTokens: 2500 });
   const answer = llmText
     ? (previous ? (dedupeAgainstPrevious(llmText, previous.answer) || "The stored evidence doesn't say more about that beyond the previous answer.") : llmText)
     : fallbackAnswer(top, previous);

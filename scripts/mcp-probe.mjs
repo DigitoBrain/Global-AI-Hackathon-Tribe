@@ -36,6 +36,12 @@ const createdMem = await client.callTool({
 });
 console.log("create_memory:", createdMem.content[0].text);
 const memId = Number(createdMem.content[0].text.match(/#(\d+)/)[1]);
+const noTitle = await client.callTool({
+  name: "create_memory",
+  arguments: { body: "Untitled probe finding: the falcon telemetry relay drops packets when it rains." },
+});
+console.log("create_memory (no title):", noTitle.content[0].text);
+assert(/Stored memory #\d+: \S/.test(noTitle.content[0].text), "create_memory without a title generates one");
 const listedMems = await client.callTool({ name: "list_memories", arguments: { limit: 3 } });
 console.log("list_memories (first titles):", JSON.parse(listedMems.content[0].text).map((m) => m.title).join(" | ").slice(0, 200));
 const searched = await client.callTool({ name: "search_memories", arguments: { query: "checkout pool metrics", limit: 3 } });

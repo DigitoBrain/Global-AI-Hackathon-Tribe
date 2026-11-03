@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   getSession, listSessions, createSession, createMemory, attachMemory,
-  compileBrief, listMessages, addMessage, enrichMemoryKeys, backfillKeys,
+  compileBrief, listMessages, addMessage, enrichMemoryKeys, enrichMemoryTitle, backfillKeys,
   findSourceMemories, listMemories, isProviderMemory, getMemory, withMeta,
   searchMemories, graphAuthority, updateMemory, verifyMemory, autoLinkMemory,
   sessionChat, groundedAsk, promoteMessage, addFeedback, addOpenQuestion,
@@ -44,17 +44,18 @@ async function storeMemory({ title, body, session_id }) {
   const { memory, redactions } = createMemory({ title, body, source: "mcp" });
   if (session_id) attachMemory(session_id, memory.id);
   await enrichMemoryKeys(memory.id);
-  return text(`Stored memory #${memory.id}: ${memory.title}${session_id ? ` (attached to session ${session_id})` : ""} (secret redactions: ${redactions})`);
+  const fresh = title?.trim() ? memory : (await enrichMemoryTitle(memory.id)) || memory;
+  return text(`Stored memory #${fresh.id}: ${fresh.title}${session_id ? ` (attached to session ${session_id})` : ""} (secret redactions: ${redactions})`);
 }
 
 server.tool("push_context",
   "Store durable knowledge as a Tribe memory - ONLY when the user explicitly wants something remembered for good ('remember this', 'store this as a memory', 'create a memory'). The memory becomes generally available to every session. If the user is instead telling or updating a session ('tell my session...', 'push this finding to my session'), use post_to_session so it lands in chat and does not silently become permanent knowledge. No kind or category is needed: Tribe indexes the content and connects it to related memories automatically. Pass session_id to also file it into that context session.",
-  { title: z.string(), body: z.string(), session_id: z.number().optional() },
+  { title: z.string().optional(), body: z.string(), session_id: z.number().optional() },
   storeMemory);
 
 server.tool("create_memory",
-  "Create a generally-available Tribe memory - ONLY when the user explicitly asks to remember/store/create a memory. Same durable write as push_context: no kind or category is needed, Tribe indexes the content and connects it to related memories automatically. For conversational updates to a session, use post_to_session instead. Pass session_id to also file it into that context session.",
-  { title: z.string(), body: z.string(), session_id: z.number().optional() },
+  "Create a generally-available Tribe memory - ONLY when the user explicitly asks to remember/store/create a memory. Same durable write as push_context: no kind or category is needed, Tribe indexes the content and connects it to related memories automatically. Title is optional: omit it and Tribe generates a short title from the content. For conversational updates to a session, use post_to_session instead. Pass session_id to also file it into that context session.",
+  { title: z.string().optional(), body: z.string(), session_id: z.number().optional() },
   storeMemory);
 
 server.tool("list_memories",
@@ -172,7 +173,7 @@ server.tool("promote_message",
   async ({ session_id, message_id }) => {
     const out = promoteMessage(session_id, message_id);
     if (!out) return text(`Message ${message_id} not found in session ${session_id}. Use list_messages to find message ids.`);
-    if (!out.already) await enrichMemoryKeys(out.memory.id);
+    if (!out.already) { await enrichMemoryKeys(out.memory.id); await enrichMemoryTitle(out.memory.id); }
     return text(out.already
       ? `Message ${message_id} is already memory #${out.memory.id}: ${out.memory.title}`
       : `Saved message ${message_id} as memory #${out.memory.id}: ${out.memory.title}`);

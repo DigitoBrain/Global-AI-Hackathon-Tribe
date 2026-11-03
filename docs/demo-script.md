@@ -44,11 +44,13 @@ Paste into the dump box (markdown, with a fake secret):
 
 Click **Capture memory**.
 
-> "I dump anything — no folder, no category, no kind to pick. Tribe files it
-> into my session, connects it to related memories automatically, and notice:
-> the secret was redacted before storage."
+> "I dump anything — no folder, no category, no kind to pick, not even a
+> title: Tribe derived 'Checkout is slow again' from the text itself. It
+> connects the memory to related ones automatically, it's available to
+> every session I open — and notice: the secret was redacted before
+> storage."
 
-### 0:30–0:55 — Grounded chat (Section 2)
+### 0:30–1:00 — Grounded chat (Section 2)
 
 Click the chip **"What caused it?"**, then type the follow-up:
 `And why did that amplify it?`
@@ -59,10 +61,16 @@ Click the chip **"What caused it?"**, then type the follow-up:
 
 Click the chip **"No-evidence question"** (office Wi-Fi password).
 
-> "…it says 'I don't know' instead of guessing — and points me to who *can*
-> provide it, because that's tribal knowledge too."
+> "…it says 'I don't know' instead of guessing. No hedging, no invented
+> password."
 
-### 0:55–1:10 — Warnings before action
+Then click the chip **"Who can provide…?"** (vendor escalation for payments).
+
+> "And when the answer itself isn't stored, Tribe still knows who can
+> provide it — because who-can-do-what is tribal knowledge too, captured
+> as an ordinary memory."
+
+### 1:00–1:10 — Warnings before action
 
 Click **"Check a dangerous action"** (`kubectl delete pods in prod…`), then
 **"Raise pool to 200?"**.
@@ -85,7 +93,8 @@ Click **"How has guidance changed?"**. Then ask:
 Point at any assistant reply and click **Save as memory**.
 
 > "Chat is just chat. Nothing becomes knowledge until I click Save as
-> memory — then it's linked back to the sources it came from."
+> memory — then it's linked back to the sources it came from, and it's
+> available to every session, not just this one."
 
 Scroll to Section 3 briefly: show the new card, trust badges, "Findable via"
 keys.
@@ -98,14 +107,22 @@ keys.
 Type in Copilot Chat:
 
 > "Use Tribe to pull the context for my Checkout latency session and tell me
-> where things stand. Then push this finding: queue-time alert fired twice
-> today."
+> where things stand. Then tell that session: the queue-time alert fired
+> twice today."
+
+Copilot summarises from the pulled context, then the finding lands in the
+session's chat and the session replies to it — it does **not** become a
+memory. (If you want it permanent, the sentence shape is different:
+"Use Tribe to remember this: …" — that one creates a generally-available
+Memory.)
 
 > "Same session, same memories — no sharing step, no export. It's mine, so
-> it's just there: browser, IDE, any MCP client. The MCP server has the
-> same capabilities as this web app: chat, search, save, verify, retire."
+> it's just there: browser, IDE, any MCP client. And notice what didn't
+> happen: telling a session something doesn't silently make it knowledge.
+> That stays a deliberate act, on every surface."
 
-Switch back to the web app and refresh: the pushed finding is in Memories.
+Switch back to the web app and refresh: the finding and the session's reply
+are in the Context Session chat.
 
 ### 1:55–2:05 — Proof + close
 
