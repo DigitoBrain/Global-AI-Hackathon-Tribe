@@ -66,10 +66,16 @@ export default function App() {
     } else { setBrief(null); setMessages([]); }
   };
   useEffect(() => { load().catch((e) => setNotice(String(e))); }, []);
+  // Open a session at its latest message, but never yank the view when a new
+  // reply lands: wherever the user is reading is where they stay.
+  const openedSessionRef = useRef<number | null>(null);
   useEffect(() => {
     const el = chatRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, sending]);
+    if (el && sessionId && openedSessionRef.current !== sessionId && messages.length) {
+      openedSessionRef.current = sessionId;
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, sessionId]);
 
   const capture = async () => {
     if (!dump.trim()) return;
@@ -84,14 +90,27 @@ export default function App() {
     const s = await api("/api/sessions", { method: "POST", body: JSON.stringify({ title: newTitle.trim() }) });
     setNewTitle(""); load(s.id);
   };
+  const queueRef = useRef<string[]>([]);
+  const busyRef = useRef(false);
+  const [pending, setPending] = useState<string[]>([]);
+  // Clicking a suggestion while a reply is in flight queues the message instead
+  // of dropping it: questions run in order, visibly, while you keep narrating.
   const send = async (text?: string) => {
     const message = (text ?? input).trim();
-    if (!message || !sessionId || sending) return;
-    setInput(""); setSending(true);
+    if (!message || !sessionId) return;
+    setInput("");
+    queueRef.current.push(message);
+    setPending([...queueRef.current]);
+    if (busyRef.current) return;
+    busyRef.current = true; setSending(true);
     try {
-      await api(`/api/sessions/${sessionId}/chat`, { method: "POST", body: JSON.stringify({ message }) });
-      await load();
-    } catch (e) { setNotice(String(e)); } finally { setSending(false); }
+      while (queueRef.current.length) {
+        const next = queueRef.current.shift()!;
+        setPending([...queueRef.current]);
+        await api(`/api/sessions/${sessionId}/chat`, { method: "POST", body: JSON.stringify({ message: next }) });
+        await load();
+      }
+    } catch (e) { setNotice(String(e)); } finally { busyRef.current = false; setSending(false); setPending([...queueRef.current]); }
   };
   const reset = async () => { await api("/api/reset", { method: "POST" }); load(null); };
   const shown = memories;
@@ -127,7 +146,7 @@ export default function App() {
           <span className="meta">Grounded in your memories · continues via MCP in your IDE</span>
         </div>
         <div className="row">
-          <select value={sessionId ?? ""} onChange={(e) => load(Number(e.target.value))}>
+          <select value={sessionId ?? ""} disabled={sending} onChange={(e) => load(Number(e.target.value))}>
             {sessions.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
         </div>
@@ -169,6 +188,9 @@ export default function App() {
               </div>
             </div>
           ))}
+          {pending.map((q, i) => (
+            <div key={`pending-${i}`} className="bubble user queued"><Md>{q}</Md><p className="meta">Queued — will send next</p></div>
+          ))}
           {sending && <div className="bubble assistant">Thinking from your memories…</div>}
         </div>
         <div className="row chips">
@@ -182,7 +204,7 @@ export default function App() {
         <div className="row composer">
           <input className="grow" placeholder="Ask this session… (Enter to send)" value={input}
             onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
-          <button className="primary" onClick={() => send()} disabled={sending}>Send</button>
+          <button className="primary" onClick={() => send()}>{sending ? "Queue" : "Send"}</button>
         </div>
       </section>
 

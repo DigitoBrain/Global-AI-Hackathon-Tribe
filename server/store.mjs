@@ -473,18 +473,26 @@ export function currentPool(pool, temporal) {
   return temporal ? pool : pool.filter((m) => m.status !== "superseded" && m.status !== "deprecated");
 }
 
+const REPLACE_LANGUAGE = /\b(now|instead|no longer|supersedes?|replaces?|replaced by|updated? (to|from)|changed (to|from)|from now on|effective (from|immediately)|as of today)\b/i;
 export function findSupersessionCandidate(memory, pool) {
-  const mine = new Set(tok(`${memory.title} ${memory.body}`).filter((w) => w.length > 3 && !KEY_STOP.has(w)));
-  const myNums = new Set([...`${memory.title} ${memory.body}`.matchAll(/\d+/g)].map((x) => x[0]));
+  // High precision only (D-018 as amended): a prompt is warranted solely when the
+  // new memory strongly overlaps an active one AND either both state differing
+  // numeric values, or the new text explicitly announces a replacement. Mere
+  // topical kinship ("checkout is slow again" vs the root-cause analysis) is a
+  // connection, never a supersession prompt.
+  const text = `${memory.title} ${memory.body}`;
+  const mine = new Set(tok(text).filter((w) => w.length > 3 && !KEY_STOP.has(w)));
+  const myNums = new Set([...text.matchAll(/\d+/g)].map((x) => x[0]));
+  const explicitUpdate = REPLACE_LANGUAGE.test(text);
   let best = null;
   for (const c of pool) {
     if (c.id === memory.id || c.status !== "active") continue;
-    const sharedTag = (c.tags || []).some((t) => (memory.tags || []).includes(t));
     const theirs = new Set(tok(`${c.title} ${c.body}`).filter((w) => w.length > 3 && !KEY_STOP.has(w)));
     const overlap = [...mine].filter((w) => theirs.has(w)).length / Math.max(1, Math.min(mine.size, theirs.size));
     const theirNums = new Set([...`${c.title} ${c.body}`.matchAll(/\d+/g)].map((x) => x[0]));
-    const valueDiffers = [...myNums].some((n) => !theirNums.has(n)) || [...theirNums].some((n) => !myNums.has(n));
-    if (overlap >= 0.3 && (sharedTag || valueDiffers) && (!best || overlap > best.overlap)) {
+    const valueDiffers = myNums.size > 0 && theirNums.size > 0
+      && ([...myNums].some((n) => !theirNums.has(n)) || [...theirNums].some((n) => !myNums.has(n)));
+    if (overlap >= 0.45 && (valueDiffers || explicitUpdate) && (!best || overlap > best.overlap)) {
       best = { memory_id: c.id, title: c.title, overlap: Number(overlap.toFixed(2)) };
     }
   }

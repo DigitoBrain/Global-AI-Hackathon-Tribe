@@ -81,6 +81,14 @@ test("write-time supersession candidate: same topic, overlapping, different valu
     { id: 6, title: "Lunch", body: "sandwich order for friday", tags: ["food"], type: "note", status: "active" },
   ];
   assert.equal(findSupersessionCandidate(fresh, pool)?.memory_id, 5);
+  // A fresh incident note that merely relates to the root cause must not prompt.
+  const note = { id: 10, title: "Checkout is slow again", body: "p95 spiking since the deploy. Ask payments on-call before touching retries.", tags: [], status: "active" };
+  const cause = [{ id: 7, title: "Root cause: pool exhaustion after deploy", body: "Checkout latency regression was caused by DB connection pool exhaustion after a deploy reduced effective pool headroom while payment webhook retries amplified load. Fix kept pool at 50.", tags: ["checkout"], status: "active" }];
+  assert.equal(findSupersessionCandidate(note, cause), null);
+  // Explicit replacement language on a strongly overlapping text does prompt.
+  const upd = { id: 11, title: "Checkout runbook update", body: "Checkout latency: check pool saturation first, then webhook retry rate. Use rollout restart wrapper instead of the old restart-first advice, effective immediately.", tags: [], status: "active" };
+  const old = [{ id: 8, title: "Checkout runbook", body: "Checkout latency: check pool saturation first, then webhook retry rate. Old advice was restart first via pods.", tags: ["checkout"], status: "active" }];
+  assert.equal(findSupersessionCandidate(upd, old)?.memory_id, 8);
 });
 
 test("source memories (who/what can provide) match by stored knowledge, not by noise", () => {
