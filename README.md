@@ -2,7 +2,16 @@
 
 Tribe is a tribal knowledge system for an individual: captured without filing, trusted because it shows its age, guarded against what already failed, and usable in every tool you work in — so you stop carrying it all in your head.
 
-Built for the Meta Global AI Developer Hackathon (Indie track, *Build for Your World*). Vision: [tribe.md](tribe.md) · Positioning: [docs/positioning.md](docs/positioning.md) · Decisions: [docs/decisions.md](docs/decisions.md) · Plan: [docs/plan.md](docs/plan.md) · Implementation record: [docs/implementation.md](docs/implementation.md)
+Vision: [tribe.md](tribe.md) · Positioning: [docs/positioning.md](docs/positioning.md) · Decisions: [docs/decisions.md](docs/decisions.md) · Plan: [docs/plan.md](docs/plan.md) · Implementation record: [docs/implementation.md](docs/implementation.md)
+
+## Built for the Meta Global AI Developer Hackathon
+
+Tribe was designed and built for the **Meta Global AI Developer Hackathon**, in the **Indie track — *Build for Your World***: build something that solves a problem in your own world. Tribe's problem is firsthand — rebuilding context across AI tools, all day, from knowledge that lives only in one person's head.
+
+- **Submission:** this repository, plus a ~2-minute demo video (link to be added on publication) that runs the app live against the Meta Model API — no mocks; the header badge reads “Meta Model API live” throughout.
+- **Powered by Meta models:** all model work goes through the Meta Model API (`muse-spark-1.3`, via [server/llm.mjs](server/llm.mjs)) — grounded answers, brief compilation, index-key generation, and smart titles. With no key configured, the same interfaces run on deterministic logic, so judges can run everything offline.
+- **How to judge it in 5 minutes:** `npm install · npm run build · npm start`, open http://localhost:8787, then follow **The 2-minute demo** below; run `npm run scorecard` for measured retrieval quality, and `node scripts/mcp-probe.mjs` to see the 25-tool MCP parity surface exercised end to end.
+- **What it demonstrates:** capture without filing, one persistent chat-style Context Session grounded in Memories, chronology-first answers where retired facts can never leak, warnings before dangerous actions, memory that stays chat until you promote it, and the same session continued from an IDE through MCP.
 
 ## Run it
 
@@ -29,7 +38,7 @@ The UI has three sections: **Capture**, **Context Session** (one chat), **Memori
 1. **Dump anything** — paste a log or note in the capture box (try adding a fake `api_key=`): it is filed as a memory, added to the current session, and the secret is redacted before storage.
 2. **Chat the session** — in Context Session, ask “What caused the checkout latency regression?” for a cited answer, then follow up (“And why did that amplify it?”) like any chat app. “Should we raise the pool to 200?” surfaces the rejected, never-committed attempt. “How has our checkout guidance changed over time?” walks the evolution. Typing the dangerous pod-delete action gets blocked by the guardrail memory, in-chat. A no-evidence question returns an explicit “I don't know.”
 3. **Memories** — every answer's sources live here with trust badges; verify, deprecate, or mark feedback. A memory joins a session by being captured, saved from that session's chat, or pushed there while you work — there is no membership checklist to maintain.
-4. **Take Tribe to any AI client** — `npm run mcp` gives any MCP-capable AI system the same capabilities as this web app over the same store: sessions (`list_sessions` / `create_session` / `get_session` / `pull_context` / `push_context` / `append_chat` / `list_messages` / `add_open_question` / `close_open_question`), grounded conversation (`chat` / `ask` / `promote_message`), memories (`list_memories` / `search_memories` / `get_memory` / `create_memory` / `update_memory` / `verify_memory` / `feedback_memory` / `memory_versions`), and knowledge services (`find_source` / `evolution` / `guardrail_check` / `evolve_index`). Verify with `node scripts/mcp-probe.mjs`.
+4. **Take Tribe to any AI client** — `npm run mcp` gives any MCP-capable AI system the same capabilities as this web app over the same store: sessions (`list_sessions` / `create_session` / `get_session` / `pull_context` / `push_context` / `append_chat` / `list_messages` / `add_open_question` / `close_open_question`), grounded conversation (`chat` / `post_to_session` / `ask` / `promote_message`), memories (`list_memories` / `search_memories` / `get_memory` / `create_memory` / `update_memory` / `verify_memory` / `feedback_memory` / `memory_versions`), and knowledge services (`find_source` / `evolution` / `guardrail_check` / `evolve_index`). Verify with `node scripts/mcp-probe.mjs`.
 
 Use **Reset demo** to restore the seed data at any time.
 
@@ -60,6 +69,26 @@ The server resolves its store from its own location, so the host's working direc
 - One shared store ([server/store.mjs](/C:/Users/Akash/OneDrive/Documents/Global-AI-Hackathon-Tribe/server/store.mjs)) powers the web API and the MCP server: Memory Engine, Context Sessions, Context Compiler, and chat grounded by multi-index retrieval — keyword, learned index keys, chronology, trust, link-graph, and session signals fused into one ranking, with a plain-language “why” on every citation and validated index evolution from failed questions.
 - Tests: `npm test` (secret scrubbing, retrieval / no-evidence behaviour).
 
-## Roadmap (not in this MVP)
+## Where Tribe goes next
 
-Slack/GitHub/browser ingestion, real-time collaboration, team permissions, Expo mobile capture client, SAM/image memories, full MemoryRank learning loop. See [docs/plan.md](docs/plan.md).
+The MVP proves the core loop: capture without filing → grounded chat → trusted, chronology-aware answers → the same knowledge in every tool. The long-term capabilities build outward from that loop, in the order they compound:
+
+**Deeper knowledge quality**
+- **Semantic retrieval as one more fused signal.** Embeddings (local model, graceful offline fallback) join keyword, learned keys, chronology, trust, and graph in the same explainable ranking — closing the near-zero-word-overlap paraphrase gap the scorecard already measures. The scorecard becomes the before/after proof.
+- **A proactive gardener.** Today the index learns when a user clicks *Improve findability* after a failed question. Next, Tribe periodically simulates the questions a Memory *should* answer, finds findability gaps and near-duplicate or quietly-conflicting Memories on its own, and proposes validated index revisions and supersession candidates — always under the same propose → validate → keep-or-discard discipline, and never retiring knowledge without the owner.
+- **Time-travel questions.** Validity windows (`valid_to`) already record when a fact stopped being true; “what did we believe in March?” becomes answerable as a first-class query, not just an evolution narrative.
+- **Trust that learns.** Feedback, verification cadence, and citation outcomes feed a fuller MemoryRank loop, so trust is earned from use, not just set at capture.
+
+**More surfaces, same store**
+- **Browser extension and CLI** for capture and ask without leaving the page or terminal you are in; an **IDE extension** beyond MCP for teams that want it native.
+- **Mobile capture** (Expo/React Native) for voice notes, photos, and in-the-moment dumps — including image memories (SAM-class segmentation for “this part of the screenshot”), transcribed and indexed like text.
+- **Ingestion connectors** (Slack, GitHub, docs) that propose Memories from where knowledge already leaks — always through Capture's scrub-and-file path, never a parallel store.
+
+**From personal to shared — without a new system**
+- Sharing stays content-based (copy, paste, re-capture), but grows **team spaces with permissions**: shared pools layered over personal ones, so “my Tribe” and “our Tribe” rank together while ownership and trust stay visible per Memory.
+- **Collaborative Context Sessions**: several people (and their agents) working one session, with per-author provenance on every message and Memory.
+
+**Running it for real**
+- Optional sync/hosting so the same store follows you across machines (today it is deliberately local-first in one SQLite file), accounts and access control for hosted deployments, and larger-scale indexing for tens of thousands of Memories.
+
+See [docs/plan.md](docs/plan.md) for the original plan and [docs/decisions.md](docs/decisions.md) for why the lines are drawn where they are.
